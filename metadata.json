@@ -1,0 +1,10 @@
+{
+  "name": "DevSecOps Incident Analyzer",
+  "description": "Multi-agent DevOps incident analysis suite for root cause analysis (RCA) and log profiling.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "Log Analysis",
+    "RCA Visualization",
+    "DevOps Tool Integration"
+  ]
+}
