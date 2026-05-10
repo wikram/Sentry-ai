@@ -23,7 +23,8 @@ import {
   Power,
   PowerOff,
   Save,
-  X
+  X,
+  Upload
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Incident, RCAAgent } from './types';
@@ -1021,71 +1022,100 @@ _ LISTEN_STDOUT >> sync: [###############] 100%`);
                   </div>
                 </div>
 
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[700px]">
-                  <header className="px-6 py-4 bg-slate-800/50 border-b border-slate-700 flex items-center justify-between">
-                    <div className="flex items-center gap-4">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-[calc(100vh-250px)] min-h-[500px]">
+                  {/* Input Side */}
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col h-full">
+                    <header className="px-6 py-4 bg-white border-b border-slate-200 flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
-                        <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest font-bold">Aggregated Stream</span>
+                        <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                        <span className="text-[10px] font-mono text-slate-500 uppercase tracking-widest font-bold">Input: Raw Stream</span>
                       </div>
-                      <div className="h-4 w-px bg-slate-700 mx-2"></div>
-                      <div className="flex gap-3">
-                        {['k8s-prod-1', 'payment-gateway', 'auth-service'].map(s => (
-                          <span key={s} className="text-[10px] px-2 py-0.5 rounded bg-slate-700 text-slate-300 font-mono flex items-center gap-1.5">
-                            <Activity size={10} className="text-blue-400" /> {s}
-                          </span>
-                        ))}
+                      <div className="flex items-center gap-2 text-[10px] font-mono text-slate-400">
+                        <label className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 hover:border-blue-400 rounded-lg text-[10px] font-bold text-slate-600 cursor-pointer transition-all shadow-sm">
+                          <Upload size={12} className="text-blue-500" />
+                          <span>UPLOAD FILE</span>
+                          <input 
+                            type="file" 
+                            className="hidden" 
+                            accept=".txt,.log,text/*"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                const reader = new FileReader();
+                                reader.onload = (event) => {
+                                  if (event.target?.result) {
+                                    setLogStream(event.target.result as string);
+                                  }
+                                };
+                                reader.readAsText(file);
+                              }
+                            }}
+                          />
+                        </label>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={12} />
-                        <input 
-                          type="text" 
-                          placeholder="grep pattern..." 
-                          className="bg-slate-900 border border-slate-700 rounded-lg py-1.5 pl-9 pr-4 text-[10px] font-mono focus:outline-none focus:ring-1 focus:ring-blue-500/30 w-48 text-slate-300"
-                        />
-                      </div>
-                    </div>
-                  </header>
-                  
-                  <div className="flex-1 flex flex-col gap-4 p-4 relative overflow-hidden">
-                    <div className="flex-1 relative border border-slate-800 rounded-xl overflow-hidden">
-                      <div className="absolute top-3 left-6 text-[9px] font-bold text-slate-600 uppercase tracking-widest z-10">Input: Raw Stream</div>
+                    </header>
+                    
+                    <div className="flex-1 relative bg-white">
                       <textarea 
                         value={logStream}
                         onChange={(e) => setLogStream(e.target.value)}
                         spellCheck={false}
-                        className="w-full h-full bg-slate-950 overflow-y-auto p-10 pr-6 font-mono text-xs text-slate-300 resize-none focus:outline-none custom-scrollbar selection:bg-blue-500/30 whitespace-pre"
-                        placeholder="Paste your logs here for cross-system analysis..."
+                        className="w-full h-full bg-transparent overflow-y-auto p-10 pr-6 font-mono text-xs text-slate-800 resize-none focus:outline-none custom-scrollbar selection:bg-blue-500/30 whitespace-pre"
+                        placeholder="Paste logs here or upload a file..."
                       />
                     </div>
-                    <div className="flex-1 relative bg-slate-900/50 border border-slate-800 rounded-xl overflow-hidden">
-                      <div className="absolute top-3 left-6 text-[9px] font-bold text-blue-500 uppercase tracking-widest flex items-center gap-2 z-10">
-                        {isAnalyzing && <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-ping" />}
-                        Output: Intelligence Report
+
+                    <footer className="px-6 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
+                      <div className="text-[9px] font-mono text-slate-400">
+                        {logStream.length.toLocaleString()} characters
                       </div>
-                      <div className="w-full h-full overflow-y-auto p-10 pr-6 font-mono text-xs text-blue-400/90 whitespace-pre-wrap selection:bg-blue-500/30">
+                      <div className="flex gap-3">
+                        {['k8s-prod', 'auth-svc'].map(s => (
+                          <span key={s} className="text-[9px] px-2 py-0.5 rounded-full bg-white border border-slate-200 text-slate-500 font-mono">
+                            {s}
+                          </span>
+                        ))}
+                      </div>
+                    </footer>
+                  </div>
+
+                  {/* Output Side */}
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden flex flex-col h-full">
+                    <header className="px-6 py-4 bg-slate-800/30 border-b border-slate-800 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        {isAnalyzing ? (
+                          <div className="w-2 h-2 rounded-full bg-blue-500 animate-ping" />
+                        ) : (
+                          <Activity size={14} className="text-blue-400" />
+                        )}
+                        <span className="text-[10px] font-mono text-blue-400 uppercase tracking-widest font-bold">Intelligence Report</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="h-4 w-px bg-slate-800" />
+                        <div className="text-[10px] font-mono text-slate-500 uppercase">Analysis Precision: High</div>
+                      </div>
+                    </header>
+
+                    <div className="flex-1 relative bg-black/20">
+                      <div className="w-full h-full overflow-y-auto p-10 pr-6 font-mono text-xs text-blue-100/90 whitespace-pre-wrap selection:bg-blue-500/30 leading-relaxed custom-scrollbar">
                         {analysisResult || (
-                          <div className="text-slate-700 italic">
-                            Report will appear here after analysis...
+                          <div className="flex flex-col items-center justify-center h-full text-slate-600 italic gap-3">
+                            <Cpu size={32} className="opacity-20 translate-y-2" />
+                            <span>Report will be generated upon processing...</span>
                           </div>
                         )}
                       </div>
                     </div>
-                  </div>
 
-                  <footer className="px-6 py-3 bg-slate-800 border-t border-slate-700 flex items-center justify-between">
-                    <div className="flex gap-4">
-                      <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-                        <Cpu size={12} className="text-green-500" /> 3 Agents Listening
+                    <footer className="px-6 py-3 bg-slate-900 border-t border-slate-800 flex items-center justify-between">
+                      <div className="flex gap-4">
+                        <div className="flex items-center gap-1.5 text-[9px] text-slate-400 font-bold uppercase tracking-widest">
+                          <Cpu size={12} className="text-green-500" /> Agents Listening
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-                        <Activity size={12} className="text-blue-500" /> 1.2k events/min
-                      </div>
-                    </div>
-                    <div className="text-[10px] font-mono text-slate-500">UPTIME: 14:22:04</div>
-                  </footer>
+                      <div className="text-[9px] font-mono text-slate-500 uppercase">Up-time: 14:22:04</div>
+                    </footer>
+                  </div>
                 </div>
               </motion.div>
             ) : activeTab === 'agents' ? (
