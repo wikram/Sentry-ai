@@ -24,8 +24,10 @@ import {
   Power,
   PowerOff,
   Save,
+  ShieldCheck,
   X,
-  Upload
+  Upload,
+  Send
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Incident, RCAAgent } from './types';
@@ -41,18 +43,8 @@ export default function App() {
   const [apiBackendUrl, setApiBackendUrl] = useState<string>('');
   const [lastTriggeredApi, setLastTriggeredApi] = useState<{ url: string, payload: any, response?: any, status?: number } | null>(null);
   const [showApiNotification, setShowApiNotification] = useState(false);
-  const [logStream, setLogStream] = useState<string>(`_ SESSION START: ${new Date().toISOString()}
-05:01:12 [SYSTEM] Initializing distributed trace collection...
-05:01:13 [SYSTEM] Connected to 12 active sources. Listening for events.
-
-05:02:01 [HTTP] GET /api/v1/health - 200 OK (checkout-service)
-05:02:03 [HTTP] POST /api/v1/orders - 201 Created (checkout-service)
-05:02:05 [ERROR] Uncaught Exception: ETIMEDOUT - connection lost to redis-main
-05:02:06 [WARN] Retry attempt 1/3 for redis-main...
-05:02:08 [K8S] Pod checkout-v2-5b6d7f9c-xh2j1 restart signal received
-05:02:10 [FATAL] Circuit Breaker OPEN: payment-gateway has failed 5 consecutive health checks
-
-_ LISTEN_STDOUT >> sync: [###############] 100%`);
+  const [logStream, setLogStream] = useState<string>('');
+  const [description, setDescription] = useState<string>('');
   const [analysisResult, setAnalysisResult] = useState<string>('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisHistory, setAnalysisHistory] = useState<{ id: string, timestamp: string, input: string, output: string }[]>([]);
@@ -60,34 +52,28 @@ _ LISTEN_STDOUT >> sync: [###############] 100%`);
 
   const isAnalysisAgentAdded = agents.some(a => a.isActive && (a.backendUrl?.includes('/api/v1/analyze') || a.backendUrl?.includes('/api/vx/analyze')));
 
-  const handleAnalyzeLogs = () => {
+  const handleAnalyzeLogs = async () => {
     setIsAnalyzing(true);
     setAnalysisResult('Initializing engine...\nScanning for anomalies...');
     
-    setTimeout(() => {
-      const errorCount = (logStream.match(/\[ERROR\]|\[FATAL\]/g) || []).length;
-      const warnCount = (logStream.match(/\[WARN\]/g) || []).length;
-      
-      let report = `### INTELLIGENT ANALYSIS REPORT\n\n`;
-      report += `DETECTED ANOMALIES:\n`;
-      report += `---------------------\n`;
-      report += `• Critical Failures: ${errorCount}\n`;
-      report += `• System Warnings:   ${warnCount}\n\n`;
-      
-      if (logStream.toLowerCase().includes('redis')) {
-        report += `[IDENTIFIED ISSUE]: Persistence Layer Instability\n`;
-        report += `Connection timeouts to redis-main suggest a potential master-node flip or networking partition.\n\n`;
-      }
-      
-      if (logStream.toLowerCase().includes('circuit breaker')) {
-        report += `[IDENTIFIED ISSUE]: Service Interruption\n`;
-        report += `Circuit breaker for 'payment-gateway' is OPEN. All traffic to this service is being rejected to preserve stability.\n\n`;
+    try {
+      const response = await fetch(`${apiBackendUrl.replace(/\/$/, '')}/api/analyze`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          logs: logStream,
+          description: description || "Analysis request"
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Analysis request failed with status ${response.status}`);
       }
 
-      report += `PROPOSED REMEDIATION:\n`;
-      report += `1. Verify health of redis-main-0 pod logs.\n`;
-      report += `2. Trigger manual circuit reset if dependency is stable.\n`;
-      report += `3. Investigate pod checkout-v2 restart triggers.`;
+      const data = await response.json();
+      const report = data.report || data.analysis || data.result || JSON.stringify(data, null, 2);
       
       setAnalysisResult(report);
       setIsAnalyzing(false);
@@ -99,7 +85,11 @@ _ LISTEN_STDOUT >> sync: [###############] 100%`);
         input: logStream,
         output: report
       }, ...prev]);
-    }, 1200);
+    } catch (err) {
+      console.error('Log analysis failed:', err);
+      setAnalysisResult(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      setIsAnalyzing(false);
+    }
   };
 
   const [failedJenkinsJobs, setFailedJenkinsJobs] = useState<any[]>([]);
@@ -944,7 +934,7 @@ _ LISTEN_STDOUT >> sync: [###############] 100%`);
                 {/* Stats Cards */}
                 <div className="grid grid-cols-4 gap-6">
                   <StatCard label="Total Active" value="12" sub="Across 3 Clusters" color="blue" />
-                  <StatCard label="Critical" value="03" sub="+1 in last 1hr" color="red" />
+                  <StatCard label="Critical" value="00" sub="+1 in last 1hr" color="red" />
                   <StatCard label="Avg. Resolution" value="24m" sub="98th percentile" color="green" />
                   <StatCard label="Agent Coverage" value="94%" sub="12 Hybrid Agents" color="slate" />
                 </div>
@@ -1020,7 +1010,7 @@ _ LISTEN_STDOUT >> sync: [###############] 100%`);
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -20 }}
-                className="w-[90%] mx-auto space-y-8"
+                className="w-full space-y-6"
               >
                 <div className="flex items-center justify-between">
                   <div>
@@ -1029,7 +1019,7 @@ _ LISTEN_STDOUT >> sync: [###############] 100%`);
                   </div>
                   <div className="flex gap-3">
                     <button 
-                      onClick={() => { setLogStream(''); setAnalysisResult(''); }}
+                      onClick={() => { setLogStream(''); setAnalysisResult(''); setDescription(''); }}
                       className="px-4 py-2 border border-slate-200 text-slate-600 rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2 hover:bg-slate-50 transition-all"
                     >
                       <Terminal size={14} /> Clear Stream
@@ -1046,15 +1036,15 @@ _ LISTEN_STDOUT >> sync: [###############] 100%`);
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-6 h-[calc(100vh-250px)] min-h-[800px]">
-                  {/* Input Side */}
-                  <div className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col min-h-0">
-                    <header className="px-6 py-4 bg-white border-b border-slate-200 flex items-center justify-between">
+                <div className="flex flex-col gap-8 h-auto">
+                  {/* Input Side - Aligned Right */}
+                  <div className="w-[95%] ml-auto bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col">
+                    <header className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-                        <span className="text-[10px] font-mono text-slate-500 uppercase tracking-widest font-bold">Input: Raw Stream</span>
+                        <span className="text-[10px] font-mono text-slate-500 uppercase tracking-widest font-bold">Input: Log Stream Payload</span>
                       </div>
-                      <div className="flex items-center gap-2 text-[10px] font-mono text-slate-400">
+                      <div className="flex items-center gap-2">
                         <label className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 hover:border-blue-400 rounded-lg text-[10px] font-bold text-slate-600 cursor-pointer transition-all shadow-sm">
                           <Upload size={12} className="text-blue-500" />
                           <span>UPLOAD FILE</span>
@@ -1079,65 +1069,78 @@ _ LISTEN_STDOUT >> sync: [###############] 100%`);
                       </div>
                     </header>
                     
-                    <div className="flex-1 relative bg-white">
-                      <textarea 
-                        value={logStream}
-                        onChange={(e) => setLogStream(e.target.value)}
-                        spellCheck={false}
-                        className="w-full h-full bg-transparent overflow-y-auto p-10 pr-6 font-mono text-xs text-slate-800 resize-none focus:outline-none custom-scrollbar selection:bg-blue-500/30 whitespace-pre"
-                        placeholder="Paste logs here or upload a file..."
-                      />
+                    <div className="p-8 space-y-6">
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Description / Instructions</label>
+                          <span className={`text-[9px] font-mono ${description.length >= 200 ? 'text-red-500 font-bold' : 'text-slate-400'}`}>
+                            {description.length}/200
+                          </span>
+                        </div>
+                        <input 
+                          type="text"
+                          value={description}
+                          onChange={(e) => setDescription(e.target.value.slice(0, 200))}
+                          placeholder="What should I look for? (e.g. 'Identify latency bottlenecks')"
+                          className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/10 focus:border-blue-400 transition-all font-medium"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Logs</label>
+                        <textarea 
+                          value={logStream}
+                          onChange={(e) => setLogStream(e.target.value)}
+                          spellCheck={false}
+                          className="w-full h-64 bg-slate-50 border border-slate-100 rounded-xl p-4 font-mono text-[11px] text-slate-800 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/10 focus:border-blue-400 transition-all custom-scrollbar selection:bg-blue-500/10 leading-relaxed"
+                          placeholder="Paste logs here..."
+                        />
+                      </div>
                     </div>
 
-                    <footer className="px-6 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
-                      <div className="text-[9px] font-mono text-slate-400">
-                        {logStream.length.toLocaleString()} characters
-                      </div>
-                      <div className="flex gap-3">
-                        {['k8s-prod', 'auth-svc'].map(s => (
-                          <span key={s} className="text-[9px] px-2 py-0.5 rounded-full bg-white border border-slate-200 text-slate-500 font-mono">
-                            {s}
-                          </span>
-                        ))}
-                      </div>
+                    <footer className="px-8 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
+                       <span className="text-[9px] font-mono text-slate-400 uppercase tracking-tighter">
+                         Payload Size: {logStream.length.toLocaleString()} Bytes
+                       </span>
                     </footer>
                   </div>
 
-                  {/* Output Side */}
-                  <div className="flex-1 bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden flex flex-col min-h-0">
-                    <header className="px-6 py-4 bg-slate-800/30 border-b border-slate-800 flex items-center justify-between">
+                  {/* Output Side - Aligned Left */}
+                  <div className="w-[95%] mr-auto bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden flex flex-col min-h-[300px]">
+                    <header className="px-6 py-4 bg-slate-800/50 border-b border-slate-800 flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         {isAnalyzing ? (
                           <div className="w-2 h-2 rounded-full bg-blue-500 animate-ping" />
                         ) : (
                           <Activity size={14} className="text-blue-400" />
                         )}
-                        <span className="text-[10px] font-mono text-blue-400 uppercase tracking-widest font-bold">Intelligence Report</span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <div className="h-4 w-px bg-slate-800" />
-                        <div className="text-[10px] font-mono text-slate-500 uppercase">Analysis Precision: High</div>
+                        <span className="text-[10px] font-mono text-blue-400 uppercase tracking-widest font-bold">Intelligence Analysis Report</span>
                       </div>
                     </header>
 
-                    <div className="flex-1 relative bg-black/20">
-                      <div className="w-full h-full overflow-y-auto p-10 pr-6 font-mono text-xs text-blue-100/90 whitespace-pre-wrap selection:bg-blue-500/30 leading-relaxed custom-scrollbar">
-                        {analysisResult || (
-                          <div className="flex flex-col items-center justify-center h-full text-slate-600 italic gap-3">
-                            <Cpu size={32} className="opacity-20 translate-y-2" />
-                            <span>Report will be generated upon processing...</span>
-                          </div>
-                        )}
-                      </div>
+                    <div className="flex-1 p-8">
+                      {isAnalyzing ? (
+                        <div className="flex flex-col items-center justify-center h-48 gap-4">
+                           <div className="w-8 h-8 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
+                           <span className="text-[10px] text-blue-400 font-bold uppercase tracking-widest animate-pulse">Agent is processing data nodes...</span>
+                        </div>
+                      ) : analysisResult ? (
+                        <div className="font-mono text-xs text-blue-100/90 whitespace-pre-wrap leading-relaxed selection:bg-blue-500/30">
+                          {analysisResult}
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center justify-center p-12 text-slate-600 italic gap-4 opacity-40">
+                          <Cpu size={40} />
+                          <span className="text-[10px] uppercase font-bold tracking-[0.2em]">Awaiting Data for Synthesis</span>
+                        </div>
+                      )}
                     </div>
 
-                    <footer className="px-6 py-3 bg-slate-900 border-t border-slate-800 flex items-center justify-between">
-                      <div className="flex gap-4">
-                        <div className="flex items-center gap-1.5 text-[9px] text-slate-400 font-bold uppercase tracking-widest">
-                          <Cpu size={12} className="text-green-500" /> Agents Listening
-                        </div>
+                    <footer className="px-8 py-4 bg-black/40 border-t border-slate-800/50 flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-[9px] text-slate-500 font-bold uppercase tracking-widest">
+                        <ShieldCheck size={12} className="text-blue-500" /> AICORE-V3 VERIFIED
                       </div>
-                      <div className="text-[9px] font-mono text-slate-500 uppercase">Up-time: 14:22:04</div>
+                      <span className="text-[9px] font-mono text-slate-600 uppercase">Analysis Precision: High</span>
                     </footer>
                   </div>
                 </div>
