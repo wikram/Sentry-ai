@@ -50,7 +50,7 @@ export default function App() {
   const [analysisHistory, setAnalysisHistory] = useState<{ id: string, timestamp: string, input: string, output: string }[]>([]);
   const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
 
-  const isAnalysisAgentAdded = agents.some(a => a.isActive && (a.backendUrl?.includes('/api/v1/analyze') || a.backendUrl?.includes('/api/vx/analyze')));
+  const isAnalysisAgentAdded = agents.length > 0;
 
   const handleAnalyzeLogs = async () => {
     setIsAnalyzing(true);
@@ -1028,7 +1028,7 @@ export default function App() {
                       onClick={handleAnalyzeLogs}
                       disabled={isAnalyzing || !logStream || !isAnalysisAgentAdded}
                       className="px-4 py-2 bg-slate-900 text-white rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2 shadow-lg shadow-slate-900/10 disabled:opacity-50"
-                      title={!isAnalysisAgentAdded ? "Requires an active agent with /api/v1/analyze endpoint" : ""}
+                      title={!isAnalysisAgentAdded ? "Please add at least one agent to proceed" : ""}
                     >
                       {isAnalyzing ? <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Plus size={14} />} 
                       Analyze Logs
