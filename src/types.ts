@@ -19,6 +19,8 @@ export interface RCAAgent {
   role: string;
   avatar: string;
   status: 'analyzing' | 'idle' | 'complete';
+  isActive: boolean;
+  backendUrl?: string;
   findings: string[];
 }
 

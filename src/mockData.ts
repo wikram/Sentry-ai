@@ -34,6 +34,7 @@ export const MOCK_AGENTS: RCAAgent[] = [
     role: 'Infrastructure Specialist',
     avatar: '🤖',
     status: 'analyzing',
+    isActive: true,
     findings: [
       'CPU spikes detected on node k8s-worker-7',
       'Memory pressure transition observed at 14:22:10'
@@ -45,6 +46,7 @@ export const MOCK_AGENTS: RCAAgent[] = [
     role: 'Network Flow Analyst',
     avatar: '🛰️',
     status: 'complete',
+    isActive: true,
     findings: [
       'Increased latency on api-gateway endpoint',
       'Packet drop rate exceeded threshold in VPC-2'
@@ -56,6 +58,7 @@ export const MOCK_AGENTS: RCAAgent[] = [
     role: 'Storage & DB Auditor',
     avatar: '💾',
     status: 'idle',
+    isActive: true,
     findings: [
       'Locked queries in Postgres pool: 12 detected',
       'Storage IOPS reaching provisioned limits'
