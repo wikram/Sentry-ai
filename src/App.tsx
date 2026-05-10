@@ -13,6 +13,7 @@ import {
   Activity,
   History,
   Terminal,
+  Radar,
   ChevronRight,
   AlertTriangle,
   CheckCircle2,
@@ -108,30 +109,40 @@ _ LISTEN_STDOUT >> sync: [###############] 100%`);
 
   // Load config on mount
   useEffect(() => {
-    fetch('/api/config')
-      .then(res => res.json())
-      .then(data => {
-        setSources(data.sources || []);
-        setAgents(data.agents || []);
-        if (data.selectedModel) setSelectedModel(data.selectedModel);
-        if (data.apiBackendUrl) setApiBackendUrl(data.apiBackendUrl);
-        setLoading(false);
-      })
-      .catch(err => {
-        console.error('Failed to load config:', err);
-        setLoading(false);
-      });
-
-    // Fetch OpenRouter Models
-    fetch('https://openrouter.ai/api/v1/models')
-      .then(res => res.json())
-      .then(data => {
-        setSupportedModels(data.data || []);
-        if (data.data && data.data.length > 0) {
-          setSelectedModel(data.data[0].id);
+    async function init() {
+      try {
+        // First load current config
+        const configRes = await fetch('/api/config');
+        const configData = await configRes.json();
+        
+        setSources(configData.sources || []);
+        setAgents(configData.agents || []);
+        let savedModel = '';
+        if (configData.selectedModel) {
+          savedModel = configData.selectedModel;
+          setSelectedModel(savedModel);
         }
-      })
-      .catch(err => console.error('Failed to fetch OpenRouter models:', err));
+        if (configData.apiBackendUrl) setApiBackendUrl(configData.apiBackendUrl);
+
+        // Then fetch supported models
+        const modelsRes = await fetch('https://openrouter.ai/api/v1/models');
+        const modelsData = await modelsRes.json();
+        const models = modelsData.data || [];
+        setSupportedModels(models);
+
+        // If no model was saved in config, use the first available model as fallback
+        if (!savedModel && models.length > 0) {
+          setSelectedModel(models[0].id);
+        }
+        
+        setLoading(false);
+      } catch (err) {
+        console.error('Initialization failed:', err);
+        setLoading(false);
+      }
+    }
+
+    init();
   }, []);
 
   // Auto-scrape Jenkins failed jobs every 5 minutes
@@ -811,10 +822,13 @@ _ LISTEN_STDOUT >> sync: [###############] 100%`);
       </AnimatePresence>
       <aside className="w-64 border-r border-slate-200 bg-white flex flex-col">
         <div className="p-6 flex items-center gap-3">
-          <div className="w-8 h-8 bg-slate-900 rounded flex items-center justify-center">
-             <div className="w-4 h-4 border-2 border-white rotate-45"></div>
+          <div className="w-8 h-8 bg-slate-900 rounded flex items-center justify-center text-white">
+             <Radar size={18} />
           </div>
-          <span className="font-bold tracking-tight text-lg uppercase">Sentry.ai</span>
+          <div className="flex flex-col">
+            <span className="font-bold tracking-tighter text-sm uppercase leading-none">DevSecOps</span>
+            <span className="font-medium tracking-tighter text-[9px] text-slate-400 uppercase leading-none">Incident Analyzer</span>
+          </div>
         </div>
 
         <nav className="flex-1 px-4 space-y-1">
@@ -1548,10 +1562,10 @@ _ LISTEN_STDOUT >> sync: [###############] 100%`);
                   <button 
                     onClick={handleSaveToXml}
                     disabled={isSaving}
-                    className="px-4 py-2 border border-slate-200 text-slate-600 rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2 hover:bg-slate-50 transition-all disabled:opacity-50"
+                    className="px-6 py-3 bg-black text-white hover:bg-slate-900 rounded-xl text-xs font-bold uppercase tracking-widest flex items-center gap-2 shadow-lg shadow-black/10 transition-all disabled:opacity-50"
                   >
                     <Save size={16} className={isSaving ? 'animate-pulse' : ''} />
-                    {isSaving ? 'Saving...' : 'Save Configuration'}
+                    {isSaving ? 'Saving...' : 'SAVE MODEL'}
                   </button>
                 </div>
 
