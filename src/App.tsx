@@ -27,14 +27,16 @@ import {
   ShieldCheck,
   X,
   Upload,
-  Send
+  Send,
+  Database
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { GoogleGenAI } from "@google/genai";
 import { Incident, RCAAgent } from './types';
 import { MOCK_INCIDENTS } from './mockData';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'history' | 'log-analyzer' | 'agents' | 'integrations' | 'models' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'history' | 'log-analyzer' | 'agents' | 'data-sources' | 'integrations' | 'models' | 'settings'>('dashboard');
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
   const [sources, setSources] = useState<any[]>([]);
   const [agents, setAgents] = useState<RCAAgent[]>([]);
@@ -45,6 +47,8 @@ export default function App() {
   const [showApiNotification, setShowApiNotification] = useState(false);
   const [logStream, setLogStream] = useState<string>('');
   const [description, setDescription] = useState<string>('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isFileInputMode, setIsFileInputMode] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<string>('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisHistory, setAnalysisHistory] = useState<{ id: string, timestamp: string, input: string, output: string }[]>([]);
@@ -57,22 +61,136 @@ export default function App() {
     setAnalysisResult('Initializing engine...\nScanning for anomalies...');
     
     try {
-      const response = await fetch(`${apiBackendUrl.replace(/\/$/, '')}/api/analyze`, {
+      if (isFileInputMode && selectedFile) {
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+        formData.append('description', description || "Analysis request");
+
+        const baseUrl = apiBackendUrl ? apiBackendUrl.replace(/\/$/, '') : '';
+        const targetUrl = `${baseUrl}/api/analyze-file`;
+
+        setLastTriggeredApi({
+          url: targetUrl,
+          payload: { fileName: selectedFile.name, description }
+        });
+
+        const response = await fetch(targetUrl, {
+          method: 'POST',
+          body: formData
+        });
+
+        setLastTriggeredApi(prev => prev ? { 
+          ...prev, 
+          status: response.status 
+        } : null);
+
+        if (!response.ok) {
+          throw new Error(`Analysis request failed with status ${response.status}`);
+        }
+
+        const data = await response.json();
+        setLastTriggeredApi(prev => prev ? { 
+          ...prev, 
+          response: data 
+        } : null);
+        setShowApiNotification(true);
+
+        const report = data.report || data.analysis || data.result || JSON.stringify(data, null, 2);
+        
+        setAnalysisResult(report);
+        setIsAnalyzing(false);
+
+        // Add to history
+        setAnalysisHistory(prev => [{
+          id: `ANL-FILE-${Date.now()}`,
+          timestamp: new Date().toISOString(),
+          input: `Analyzed File: ${selectedFile.name} (${(selectedFile.size / 1024).toFixed(2)} KB)`,
+          output: report
+        }, ...prev]);
+        
+        return;
+      }
+
+      if (!apiBackendUrl) {
+        // Use Frontend SDK
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (!apiKey) {
+          throw new Error('GEMINI_API_KEY is not available in the environment.');
+        }
+        
+        const ai = new GoogleGenAI({ apiKey });
+        const prompt = `
+          You are an expert SRE and Log Analysis Agent. 
+          Analyze the following system logs and provide a concise, high-impact report.
+          
+          User Context/Instructions: ${description || "General analysis"}
+          
+          Logs:
+          ${logStream.slice(0, 20000)}
+          
+          Provide the report in Markdown format. 
+          Focus on:
+          1. Detected Anomalies/Errors
+          2. Potential Root Causes
+          3. Recommended Actions
+        `;
+
+        const response = await ai.models.generateContent({
+          model: "gemini-3-flash-preview",
+          contents: prompt
+        });
+
+        const report = response.text || "No analysis generated.";
+        
+        setAnalysisResult(report);
+        setIsAnalyzing(false);
+
+        // Add to history
+        setAnalysisHistory(prev => [{
+          id: `ANL-${Date.now()}`,
+          timestamp: new Date().toISOString(),
+          input: logStream,
+          output: report
+        }, ...prev]);
+        
+        return;
+      }
+
+      const targetUrl = `${apiBackendUrl.replace(/\/$/, '')}/api/analyze`;
+      const payload = {
+        logs: logStream,
+        description: description || "Analysis request"
+      };
+
+      setLastTriggeredApi({
+        url: targetUrl,
+        payload: payload
+      });
+
+      const response = await fetch(targetUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          logs: logStream,
-          description: description || "Analysis request"
-        })
+        body: JSON.stringify(payload)
       });
+
+      setLastTriggeredApi(prev => prev ? { 
+        ...prev, 
+        status: response.status 
+      } : null);
 
       if (!response.ok) {
         throw new Error(`Analysis request failed with status ${response.status}`);
       }
 
       const data = await response.json();
+      setLastTriggeredApi(prev => prev ? { 
+        ...prev, 
+        response: data 
+      } : null);
+      setShowApiNotification(true);
+
       const report = data.report || data.analysis || data.result || JSON.stringify(data, null, 2);
       
       setAnalysisResult(report);
@@ -841,10 +959,10 @@ export default function App() {
             onClick={() => setActiveTab('history')} 
           />
           <NavItem 
-            icon={<Cpu size={18} />} 
-            label="Agents" 
-            active={activeTab === 'agents'} 
-            onClick={() => setActiveTab('agents')} 
+            icon={<Database size={18} />} 
+            label="Data Sources" 
+            active={activeTab === 'data-sources'} 
+            onClick={() => setActiveTab('data-sources')} 
           />
           <NavItem 
             icon={<Activity size={18} />} 
@@ -857,6 +975,12 @@ export default function App() {
             label="Models" 
             active={activeTab === 'models'} 
             onClick={() => setActiveTab('models')} 
+          />
+          <NavItem 
+            icon={<Cpu size={18} />} 
+            label="Agents" 
+            active={activeTab === 'agents'} 
+            onClick={() => setActiveTab('agents')} 
           />
         </nav>
 
@@ -876,7 +1000,7 @@ export default function App() {
         <header className="h-16 border-b border-slate-200 bg-white/80 backdrop-blur-md flex items-center justify-between px-8 z-10 shadow-sm">
           <div className="flex items-center gap-4">
             <h1 className="text-[11px] font-bold text-slate-400 uppercase tracking-[0.2em]">
-              {selectedIncident ? `INCIDENT / ${selectedIncident.id}` : activeTab === 'dashboard' ? 'Overview' : activeTab.toUpperCase()}
+              {selectedIncident ? `INCIDENT / ${selectedIncident.id}` : activeTab === 'dashboard' ? 'Overview' : activeTab === 'data-sources' ? 'Data Sources' : activeTab.toUpperCase()}
             </h1>
           </div>
           <div className="flex items-center gap-6">
@@ -891,6 +1015,12 @@ export default function App() {
                 <span className={`flex h-2 w-2 rounded-full ${agents.filter(a => a.isActive).length > 0 ? 'bg-green-500' : 'bg-slate-300'}`}></span>
                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
                   {agents.filter(a => a.isActive).length} / {agents.length} Agents Active
+                </span>
+              </div>
+              <div className="flex gap-2 items-center px-3 py-1 bg-purple-50 rounded-md border border-purple-100">
+                <Cpu size={12} className="text-purple-500" />
+                <span className="text-[10px] font-bold text-purple-700 uppercase tracking-widest">
+                  Model: {selectedModel || 'Detecting...'}
                 </span>
               </div>
             </div>
@@ -933,10 +1063,33 @@ export default function App() {
               >
                 {/* Stats Cards */}
                 <div className="grid grid-cols-4 gap-6">
-                  <StatCard label="Total Active" value="12" sub="Across 3 Clusters" color="blue" />
-                  <StatCard label="Critical" value="00" sub="+1 in last 1hr" color="red" />
+                  <StatCard 
+                    label="Total Active" 
+                    value={MOCK_INCIDENTS.filter(i => i.status !== 'resolved').length.toString().padStart(2, '0')} 
+                    sub={`Across ${sources.length} Clusters`} 
+                    color="blue" 
+                  />
+                  <StatCard 
+                    label="Critical" 
+                    value={(() => {
+                      const criticalCount = MOCK_INCIDENTS.filter(i => i.severity === 'critical').length;
+                      const hasRecentCritical = MOCK_INCIDENTS.some(i => 
+                        i.severity === 'critical' && 
+                        (Date.now() - new Date(i.createdAt).getTime()) < 3600000
+                      );
+                      return (criticalCount + (hasRecentCritical ? 1 : 0)).toString().padStart(2, '0');
+                    })()} 
+                    sub={(() => {
+                      const recentCount = MOCK_INCIDENTS.filter(i => 
+                        i.severity === 'critical' && 
+                        (Date.now() - new Date(i.createdAt).getTime()) < 3600000
+                      ).length;
+                      return recentCount > 0 ? `+${recentCount} in last 1hr` : 'No recent criticals';
+                    })()}
+                    color="red" 
+                  />
                   <StatCard label="Avg. Resolution" value="24m" sub="98th percentile" color="green" />
-                  <StatCard label="Agent Coverage" value="94%" sub="12 Hybrid Agents" color="slate" />
+                  <StatCard label="Agent Coverage" value="94%" sub={`${agents.length} Hybrid Agents`} color="slate" />
                 </div>
 
                 {/* Incident List */}
@@ -1015,18 +1168,20 @@ export default function App() {
                 <div className="flex items-center justify-between">
                   <div>
                     <h2 className="text-2xl font-bold tracking-tight text-slate-900">Advanced Log Analyzer</h2>
-                    <p className="text-sm text-slate-500 font-medium">Cross-reference logs across all active distributed systems.</p>
+                    <div className="flex items-center gap-3 mt-1">
+                      <p className="text-sm text-slate-500 font-medium">Cross-reference logs across all active distributed systems.</p>
+                    </div>
                   </div>
                   <div className="flex gap-3">
                     <button 
-                      onClick={() => { setLogStream(''); setAnalysisResult(''); setDescription(''); }}
+                      onClick={() => { setLogStream(''); setAnalysisResult(''); setDescription(''); setSelectedFile(null); setIsFileInputMode(false); }}
                       className="px-4 py-2 border border-slate-200 text-slate-600 rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2 hover:bg-slate-50 transition-all"
                     >
                       <Terminal size={14} /> Clear Stream
                     </button>
                     <button 
                       onClick={handleAnalyzeLogs}
-                      disabled={isAnalyzing || !logStream || !isAnalysisAgentAdded}
+                      disabled={isAnalyzing || (!logStream && !selectedFile) || !isAnalysisAgentAdded}
                       className="px-4 py-2 bg-slate-900 text-white rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2 shadow-lg shadow-slate-900/10 disabled:opacity-50"
                       title={!isAnalysisAgentAdded ? "Please add at least one agent to proceed" : ""}
                     >
@@ -1041,13 +1196,15 @@ export default function App() {
                   <div className="w-[95%] ml-auto bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col">
                     <header className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-                        <span className="text-[10px] font-mono text-slate-500 uppercase tracking-widest font-bold">Input: Log Stream Payload</span>
+                        <span className={`w-2 h-2 rounded-full ${isFileInputMode ? 'bg-purple-500 animate-pulse' : 'bg-blue-500'}`}></span>
+                        <span className="text-[10px] font-mono text-slate-500 uppercase tracking-widest font-bold">
+                          Input: {isFileInputMode ? 'File Buffer (Multipart)' : 'Log Stream Payload'}
+                        </span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <label className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 hover:border-blue-400 rounded-lg text-[10px] font-bold text-slate-600 cursor-pointer transition-all shadow-sm">
-                          <Upload size={12} className="text-blue-500" />
-                          <span>UPLOAD FILE</span>
+                        <label className={`flex items-center gap-2 px-3 py-1.5 border hover:border-blue-400 rounded-lg text-[10px] font-bold cursor-pointer transition-all shadow-sm ${isFileInputMode ? 'bg-blue-50 border-blue-200 text-blue-600' : 'bg-white border-slate-200 text-slate-600'}`}>
+                          <Upload size={12} className={isFileInputMode ? "text-blue-600" : "text-blue-500"} />
+                          <span>{isFileInputMode && selectedFile ? selectedFile.name.toUpperCase() : 'UPLOAD LOG FILE'}</span>
                           <input 
                             type="file" 
                             className="hidden" 
@@ -1055,17 +1212,22 @@ export default function App() {
                             onChange={(e) => {
                               const file = e.target.files?.[0];
                               if (file) {
-                                const reader = new FileReader();
-                                reader.onload = (event) => {
-                                  if (event.target?.result) {
-                                    setLogStream(event.target.result as string);
-                                  }
-                                };
-                                reader.readAsText(file);
+                                setSelectedFile(file);
+                                setIsFileInputMode(true);
+                                setLogStream(''); // Clear text input if file selected
                               }
                             }}
                           />
                         </label>
+                        {isFileInputMode && (
+                          <button 
+                            onClick={() => { setIsFileInputMode(false); setSelectedFile(null); }}
+                            className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                            title="Switch to Text Input"
+                          >
+                            <X size={14} />
+                          </button>
+                        )}
                       </div>
                     </header>
                     
@@ -1087,20 +1249,46 @@ export default function App() {
                       </div>
 
                       <div className="space-y-2">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Logs</label>
-                        <textarea 
-                          value={logStream}
-                          onChange={(e) => setLogStream(e.target.value)}
-                          spellCheck={false}
-                          className="w-full h-64 bg-slate-50 border border-slate-100 rounded-xl p-4 font-mono text-[11px] text-slate-800 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/10 focus:border-blue-400 transition-all custom-scrollbar selection:bg-blue-500/10 leading-relaxed"
-                          placeholder="Paste logs here..."
-                        />
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                          {isFileInputMode ? 'File Manifest View' : 'Local Buffer Logs'}
+                        </label>
+                        
+                        {isFileInputMode ? (
+                          <div className="w-full h-64 bg-blue-50/20 border border-blue-100 border-dashed rounded-xl flex flex-col items-center justify-center gap-5 group transition-colors hover:bg-blue-50/40">
+                            <div className="w-20 h-20 bg-white rounded-3xl shadow-xl shadow-blue-500/5 border border-blue-100 flex items-center justify-center text-blue-500 group-hover:scale-110 transition-all duration-500">
+                              <Terminal size={40} />
+                            </div>
+                            <div className="text-center space-y-1">
+                              <p className="text-sm font-bold text-slate-900 tracking-tight">{selectedFile?.name || 'Awaiting selection...'}</p>
+                              <p className="text-[10px] text-slate-400 font-mono uppercase tracking-widest">
+                                {selectedFile 
+                                  ? `${(selectedFile.size / 1024).toFixed(2)} KB • ${selectedFile.type || 'plain/text'}`
+                                  : 'Select a direct log file system resource'
+                                }
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2 px-3 py-1 bg-white border border-slate-100 rounded-full shadow-sm text-[9px] text-slate-400 font-bold uppercase tracking-tighter">
+                              <ShieldCheck size={10} className="text-green-500" /> Integrity Check Passed
+                            </div>
+                          </div>
+                        ) : (
+                          <textarea 
+                            value={logStream}
+                            onChange={(e) => setLogStream(e.target.value)}
+                            spellCheck={false}
+                            className="w-full h-64 bg-slate-50 border border-slate-100 rounded-xl p-4 font-mono text-[11px] text-slate-800 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/10 focus:border-blue-400 transition-all custom-scrollbar selection:bg-blue-500/10 leading-relaxed"
+                            placeholder="Paste logs here..."
+                          />
+                        )}
                       </div>
                     </div>
 
                     <footer className="px-8 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
                        <span className="text-[9px] font-mono text-slate-400 uppercase tracking-tighter">
-                         Payload Size: {logStream.length.toLocaleString()} Bytes
+                         {isFileInputMode 
+                           ? `Binary Stream Size: ${selectedFile?.size.toLocaleString() || 0} Bytes`
+                           : `Payload Size: ${logStream.length.toLocaleString()} Bytes`
+                         }
                        </span>
                     </footer>
                   </div>
@@ -1362,9 +1550,9 @@ export default function App() {
                   ))}
                 </div>
               </motion.div>
-            ) : activeTab === 'integrations' ? (
+            ) : activeTab === 'data-sources' ? (
               <motion.div 
-                key="integrations"
+                key="data-sources"
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
@@ -1549,6 +1737,33 @@ export default function App() {
                 </div>
               </div>
             </motion.div>
+            ) : activeTab === 'integrations' ? (
+              <motion.div 
+                key="integrations"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="max-w-4xl mx-auto space-y-8"
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-2xl font-bold tracking-tight">Integrations</h2>
+                    <p className="text-sm text-slate-500">Configure external communication and notification channels.</p>
+                  </div>
+                </div>
+                <div className="bg-white border border-slate-200 rounded-xl p-12 text-center flex flex-col items-center gap-4 shadow-sm">
+                  <div className="w-16 h-16 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-300">
+                    <Activity size={32} />
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="font-bold text-slate-900 tracking-tight">No Integrations Configured</h3>
+                    <p className="text-sm text-slate-400 max-w-xs mx-auto">Connect Slack, Jira, or custom webhooks to receive real-time incident analysis reports.</p>
+                  </div>
+                  <button className="mt-4 px-6 py-2.5 bg-slate-900 text-white rounded-xl text-xs font-bold uppercase tracking-widest shadow-lg shadow-slate-900/10">
+                    Browse Marketplace
+                  </button>
+                </div>
+              </motion.div>
             ) : activeTab === 'models' ? (
               <motion.div 
                 key="models"

@@ -4,12 +4,16 @@ import path from 'path';
 import fs from 'fs';
 import { XMLParser, XMLBuilder } from 'fast-xml-parser';
 import yaml from 'js-yaml';
+import multer from 'multer';
+import { GoogleGenAI } from '@google/genai';
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
   const CONFIG_PATH = path.join(process.cwd(), 'config.xml');
   const YAML_CONFIG_PATH = path.join(process.cwd(), 'config.yaml');
+
+  const upload = multer({ dest: 'uploads/' });
 
   app.use(express.json());
 
@@ -195,6 +199,66 @@ async function startServer() {
     } catch (error) {
       console.error('Error scraping Jenkins:', error);
       res.status(500).json({ error: 'Failed to scrape Jenkins jobs' });
+    }
+  });
+
+  app.post('/api/analyze-file', upload.single('file'), async (req, res) => {
+    try {
+      const description = req.body.description || "General analysis";
+      const file = req.file;
+
+      if (!file) {
+        return res.status(400).json({ error: 'No file uploaded' });
+      }
+
+      const logs = fs.readFileSync(file.path, 'utf-8');
+      
+      // Basic cleanup: remove the temporary file
+      fs.unlinkSync(file.path);
+
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        // Fallback to basic analysis if no API key is provided
+        const errorCount = (logs.match(/\[ERROR\]|\[FATAL\]/g) || []).length;
+        const warnCount = (logs.match(/\[WARN\]/g) || []).length;
+        
+        let report = `### INTELLIGENT ANALYSIS REPORT (Basic Engine - File Mode)\n\n`;
+        report += `FILE ANALYZED: ${file.originalname}\n`;
+        report += `DETECTED ANOMALIES:\n`;
+        report += `---------------------\n`;
+        report += `• Critical Failures: ${errorCount}\n`;
+        report += `• System Warnings:   ${warnCount}\n\n`;
+        report += `Note: GEMINI_API_KEY is not set. Using basic heuristic analysis.\n`;
+        
+        return res.json({ report });
+      }
+
+      const ai = new GoogleGenAI({ apiKey });
+      const prompt = `
+        You are an expert SRE and Log Analysis Agent. 
+        Analyze the following system logs from the file "${file.originalname}" and provide a concise, high-impact report.
+        
+        User Context/Instructions: ${description}
+        
+        Logs:
+        ${logs.slice(0, 20000)}
+        
+        Provide the report in Markdown format. 
+        Focus on:
+        1. Detected Anomalies/Errors
+        2. Potential Root Causes
+        3. Recommended Actions
+      `;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt
+      });
+
+      res.json({ report: response.text });
+    } catch (error) {
+      console.error('File analysis failed:', error);
+      res.status(500).json({ error: 'Log analysis engine (file mode) failed' });
     }
   });
 
