@@ -135,71 +135,42 @@ export default function App() {
   const hasActiveAgent = agents.some(a => a.isActive);
 
   const handleAnalyzeLogs = async () => {
-    const defaultAgent = agents.find(a => a.isDefault);
+    const defaultAgent = agents.find(a => a.isDefault) || agents.find(a => a.isActive) || agents[0];
     const preferredBackend = defaultAgent?.backendUrl || apiBackendUrl;
 
-    if (!hasActiveAgent && !preferredBackend) {
-      alert("No active agents or backend system configured.");
+    if (!preferredBackend) {
+      alert("No backend system configured. Please add an agent or specify a backend URL.");
       return;
     }
 
     setIsAnalyzing(true);
-    setAnalysisResult('Initializing parallel computation engine...\nDispatching payload to all active agents...');
+    setAnalysisResult('Initializing autonomous analysis engine...');
     
     try {
-      const activeAgents = agents.filter(a => a.isActive);
-      
-      // Update all active agents to 'analyzing' status
-      setAgents(prev => prev.map(a => a.isActive ? { ...a, status: 'analyzing' } : a));
+      // Update status for the primary agent
+      if (defaultAgent) {
+        setAgents(prev => prev.map(a => a.id === defaultAgent.id ? { ...a, status: 'analyzing' } : a));
+      }
+
+      let report = '';
 
       // 1. Handle File Upload if in file mode
       if (isFileInputMode && selectedFile) {
-        const baseUrl = preferredBackend || '';
-        if (!baseUrl) throw new Error("No backend system available for file analysis");
-
         const formData = new FormData();
         formData.append('file', selectedFile);
         formData.append('description', description || "Analysis request");
 
-        const targetUrl = `${baseUrl.replace(/\/$/, '')}/api/analyze-file`;
-        
+        const targetUrl = `${preferredBackend.replace(/\/$/, '')}/api/analyze-file`;
         const response = await fetch(targetUrl, { method: 'POST', body: formData });
         
         if (!response.ok) throw new Error(`File analysis failed: ${response.status}`);
         const data = await response.json();
 
-        const report = data.report || data.analysis || JSON.stringify(data, null, 2);
-        
-        setAnalysisResult(report);
-        setAnalysisHistory(prev => [{
-          id: `ANL-FILE-${Date.now()}`,
-          timestamp: new Date().toISOString(),
-          input: `Analyzed File: ${selectedFile.name}`,
-          output: report
-        }, ...prev]);
-        
-        setAgents(prev => prev.map(a => a.isActive ? { ...a, status: 'idle' } : a));
-        setIsAnalyzing(false);
-        return;
-      }
-
-      // 2. Handle Multi-Agent Analysis
-      const analysisTasks = activeAgents.map(async (agent) => {
-        const agentBackend = agent.backendUrl || preferredBackend;
-        
-        if (!agentBackend) {
-          // Fallback to frontend SDK if no backend
-          const apiKey = process.env.GEMINI_API_KEY;
-          if (!apiKey) return `[${agent.name}] Error: No API key for specialized analysis.`;
-          
-          const ai = new GoogleGenAI({ apiKey });
-          const prompt = `Specialized Analysis for ${agent.name}:\n${description}\n\nLogs:\n${logStream.slice(0, 10000)}`;
-          const res = await ai.models.generateContent({ model: agent.model || "gemini-3-flash-preview", contents: prompt });
-          return `### ${agent.name}\n\n${res.text || "No analysis generated."}`;
-        }
-
-        const targetUrl = `${agentBackend.replace(/\/$/, '')}/api/analyze`;
-        const payload = { logs: logStream, description: description || `Specialized analysis for ${agent.name}` };
+        report = data.report || data.analysis || (typeof data === 'string' ? data : JSON.stringify(data, null, 2));
+      } else {
+        // 2. Handle Log Stream Analysis
+        const targetUrl = `${preferredBackend.replace(/\/$/, '')}/api/analyze`;
+        const payload = { logs: logStream, description: description || "System log analysis request" };
         
         try {
           const res = await fetch(targetUrl, {
@@ -208,30 +179,38 @@ export default function App() {
             body: JSON.stringify(payload)
           });
           
+          if (!res.ok) throw new Error(`Analysis request failed: ${res.status}`);
           const data = await res.json();
-          const report = data.report || data.analysis || JSON.stringify(data, null, 2);
-          return `### ${agent.name}\n\n${report}`;
+          report = data.report || data.analysis || (typeof data === 'string' ? data : JSON.stringify(data, null, 2));
         } catch (err) {
-          return `### ${agent.name}\n\nFailed to reach backend system: ${err instanceof Error ? err.message : 'Unknown error'}`;
+          // Fallback to frontend SDK if backend fails or is unavailable
+          console.warn('Backend failed, attempting frontend fallback:', err);
+          const apiKey = process.env.GEMINI_API_KEY;
+          if (!apiKey) throw new Error(`Backend unavailable and no local API key found: ${err instanceof Error ? err.message : 'Unknown error'}`);
+          
+          const ai = new GoogleGenAI({ apiKey });
+          const prompt = `System Log Analysis:\n${description}\n\nLogs:\n${logStream.slice(0, 15000)}`;
+          const res = await ai.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: prompt
+          });
+          report = res.text || "No analysis generated.";
         }
-      });
+      }
 
-      const results = await Promise.all(analysisTasks);
-      const combinedReport = results.join('\n\n---\n\n');
-      
-      setAnalysisResult(combinedReport);
+      setAnalysisResult(report);
       setAnalysisHistory(prev => [{
-        id: `ANL-MULTI-${Date.now()}`,
+        id: `ANL-${Date.now()}`,
         timestamp: new Date().toISOString(),
-        input: logStream.slice(0, 500) + '...',
-        output: combinedReport
+        input: isFileInputMode ? `File: ${selectedFile?.name}` : (logStream.slice(0, 500) + '...'),
+        output: report
       }, ...prev]);
 
-      setAgents(prev => prev.map(a => a.isActive ? { ...a, status: 'idle' } : a));
+      setAgents(prev => prev.map(a => ({ ...a, status: 'idle' })));
       setIsAnalyzing(false);
     } catch (err) {
       console.error('Analysis failed:', err);
-      setAnalysisResult(`### Analysis Failed\n\n${err instanceof Error ? err.message : 'An unexpected error occurred during multi-agent orchestration.'}`);
+      setAnalysisResult(`### Analysis Encountered an Error\n\n${err instanceof Error ? err.message : 'An unexpected error occurred during analysis.'}`);
       setAgents(prev => prev.map(a => ({ ...a, status: 'idle' })));
       setIsAnalyzing(false);
     }
