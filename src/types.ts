@@ -16,11 +16,11 @@ export interface LogEntry {
 export interface RCAAgent {
   id: string;
   name: string;
-  role: string;
-  avatar: string;
   status: 'analyzing' | 'idle' | 'complete';
   isActive: boolean;
+  isDefault?: boolean;
   backendUrl?: string;
+  model?: string;
   findings: string[];
 }
 

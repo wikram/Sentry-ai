@@ -30,6 +30,53 @@ async function startServer() {
     fs.writeFileSync(CONFIG_PATH, xmlContent);
   }
 
+  // Diagnostics Proxy to avoid CORS
+  app.get('/api/diagnostics', async (req, res) => {
+    try {
+      const url = req.query.url as string;
+      if (!url) {
+        return res.status(400).json({ error: 'No URL provided' });
+      }
+
+      console.log(`Proxying diagnostics check to: ${url}`);
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
+      try {
+        const response = await fetch(url, { 
+          signal: controller.signal,
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'RCA-Agent-Diagnostics/1.0'
+          }
+        });
+        
+        clearTimeout(timeoutId);
+        
+        const contentType = response.headers.get('content-type');
+        let data: any = null;
+        
+        if (contentType && contentType.includes('application/json')) {
+          data = await response.json();
+        } else {
+          data = { message: await response.text() };
+        }
+
+        res.status(response.status).json(data);
+      } catch (fetchErr: any) {
+        clearTimeout(timeoutId);
+        if (fetchErr.name === 'AbortError') {
+          return res.status(504).json({ error: 'Request timed out' });
+        }
+        throw fetchErr;
+      }
+    } catch (error) {
+      console.error('Proxy error:', error);
+      res.status(500).json({ error: 'Failed to connect to backend system' });
+    }
+  });
+
   // API Routes
   app.get('/api/config', (req, res) => {
     try {
@@ -199,6 +246,59 @@ async function startServer() {
     } catch (error) {
       console.error('Error scraping Jenkins:', error);
       res.status(500).json({ error: 'Failed to scrape Jenkins jobs' });
+    }
+  });
+
+  app.post('/api/analyze', async (req, res) => {
+    try {
+      const { logs, description } = req.body;
+
+      if (!logs) {
+        return res.status(400).json({ error: 'No logs provided' });
+      }
+
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        // Fallback to basic analysis
+        const errorCount = (logs.match(/\[ERROR\]|\[FATAL\]/g) || []).length;
+        const warnCount = (logs.match(/\[WARN\]/g) || []).length;
+        
+        let report = `### INTELLIGENT ANALYSIS REPORT (Basic Engine)\n\n`;
+        report += `DETECTED ANOMALIES:\n`;
+        report += `---------------------\n`;
+        report += `• Critical Failures: ${errorCount}\n`;
+        report += `• System Warnings:   ${warnCount}\n\n`;
+        report += `Note: GEMINI_API_KEY is not set. Using basic heuristic analysis.\n`;
+        
+        return res.json({ report });
+      }
+
+      const ai = new GoogleGenAI({ apiKey });
+      const prompt = `
+        You are an expert SRE and Log Analysis Agent. 
+        Analyze the following system logs and provide a concise, high-impact report.
+        
+        User Context/Instructions: ${description || "General analysis"}
+        
+        Logs:
+        ${logs.slice(0, 20000)}
+        
+        Provide the report in Markdown format. 
+        Focus on:
+        1. Detected Anomalies/Errors
+        2. Potential Root Causes
+        3. Recommended Actions
+      `;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt
+      });
+
+      res.json({ report: response.text });
+    } catch (error) {
+      console.error('Analysis failed:', error);
+      res.status(500).json({ error: 'Log analysis engine failed' });
     }
   });
 

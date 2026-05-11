@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
+import ReactMarkdown from 'react-markdown';
 import { Incident, RCAAgent } from './types';
 import { MOCK_INCIDENTS } from './mockData';
 
@@ -54,162 +55,178 @@ export default function App() {
   const [analysisHistory, setAnalysisHistory] = useState<{ id: string, timestamp: string, input: string, output: string }[]>([]);
   const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
 
+  const [diagnosticsMap, setDiagnosticsMap] = useState<Record<string, { status: string, timestamp?: string, loading: boolean }>>({});
+  const [showDiagnosticsModal, setShowDiagnosticsModal] = useState(false);
+  const [diagnosticsResult, setDiagnosticsResult] = useState<{ 
+    agent: RCAAgent; 
+    status: string; 
+    details: any; 
+    timestamp: string;
+    success: boolean;
+  } | null>(null);
+
+  const handleSetDefaultAgent = (agentId: string) => {
+    setAgents(agents.map(a => ({
+      ...a,
+      isDefault: a.id === agentId
+    })));
+  };
+
+  const handleCheckDiagnostics = async (agent: RCAAgent) => {
+    if (!agent.backendUrl) return;
+
+    setDiagnosticsMap(prev => ({
+      ...prev,
+      [agent.id]: { ...(prev[agent.id] || {}), loading: true, status: 'Checking...' }
+    }));
+
+    try {
+      const baseUrl = agent.backendUrl.replace(/\/$/, '');
+      const targetUrl = `${baseUrl}/api/health`;
+      const proxyUrl = `/api/diagnostics?url=${encodeURIComponent(targetUrl)}`;
+      
+      const response = await fetch(proxyUrl);
+      const data = await response.json().catch(() => null);
+
+      let humanStatus = 'Unknown status';
+      if (response.ok) {
+        humanStatus = data && data.status ? `Healthy: ${data.status}` : 'Healthy (200 OK)';
+      } else {
+        humanStatus = `Error: ${response.status} ${response.statusText}`;
+      }
+
+      const result = {
+        agent,
+        status: humanStatus,
+        details: data,
+        timestamp: new Date().toLocaleString(),
+        success: response.ok
+      };
+
+      setDiagnosticsMap(prev => ({
+        ...prev,
+        [agent.id]: { status: humanStatus, timestamp: new Date().toLocaleTimeString(), loading: false }
+      }));
+      setDiagnosticsResult(result);
+      setShowDiagnosticsModal(true);
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Connection failed';
+      const result = {
+        agent,
+        status: `Offline: ${errorMsg}`,
+        details: { error: errorMsg },
+        timestamp: new Date().toLocaleString(),
+        success: false
+      };
+      setDiagnosticsMap(prev => ({
+        ...prev,
+        [agent.id]: { status: `Offline: ${errorMsg}`, timestamp: new Date().toLocaleTimeString(), loading: false }
+      }));
+      setDiagnosticsResult(result);
+      setShowDiagnosticsModal(true);
+    }
+  };
+
   const isAnalysisAgentAdded = agents.length > 0;
+  const hasActiveAgent = agents.some(a => a.isActive);
 
   const handleAnalyzeLogs = async () => {
+    const defaultAgent = agents.find(a => a.isDefault);
+    const preferredBackend = defaultAgent?.backendUrl || apiBackendUrl;
+
+    if (!hasActiveAgent && !preferredBackend) {
+      alert("No active agents or backend system configured.");
+      return;
+    }
+
     setIsAnalyzing(true);
-    setAnalysisResult('Initializing engine...\nScanning for anomalies...');
+    setAnalysisResult('Initializing parallel computation engine...\nDispatching payload to all active agents...');
     
     try {
+      const activeAgents = agents.filter(a => a.isActive);
+      
+      // Update all active agents to 'analyzing' status
+      setAgents(prev => prev.map(a => a.isActive ? { ...a, status: 'analyzing' } : a));
+
+      // 1. Handle File Upload if in file mode
       if (isFileInputMode && selectedFile) {
+        const baseUrl = preferredBackend || '';
+        if (!baseUrl) throw new Error("No backend system available for file analysis");
+
         const formData = new FormData();
         formData.append('file', selectedFile);
         formData.append('description', description || "Analysis request");
 
-        const baseUrl = apiBackendUrl ? apiBackendUrl.replace(/\/$/, '') : '';
-        const targetUrl = `${baseUrl}/api/analyze-file`;
-
-        setLastTriggeredApi({
-          url: targetUrl,
-          payload: { fileName: selectedFile.name, description }
-        });
-
-        const response = await fetch(targetUrl, {
-          method: 'POST',
-          body: formData
-        });
-
-        setLastTriggeredApi(prev => prev ? { 
-          ...prev, 
-          status: response.status 
-        } : null);
-
-        if (!response.ok) {
-          throw new Error(`Analysis request failed with status ${response.status}`);
-        }
-
+        const targetUrl = `${baseUrl.replace(/\/$/, '')}/api/analyze-file`;
+        const response = await fetch(targetUrl, { method: 'POST', body: formData });
+        
+        if (!response.ok) throw new Error(`File analysis failed: ${response.status}`);
         const data = await response.json();
-        setLastTriggeredApi(prev => prev ? { 
-          ...prev, 
-          response: data 
-        } : null);
-        setShowApiNotification(true);
-
-        const report = data.report || data.analysis || data.result || JSON.stringify(data, null, 2);
+        const report = data.report || data.analysis || JSON.stringify(data, null, 2);
         
         setAnalysisResult(report);
-        setIsAnalyzing(false);
-
-        // Add to history
         setAnalysisHistory(prev => [{
           id: `ANL-FILE-${Date.now()}`,
           timestamp: new Date().toISOString(),
-          input: `Analyzed File: ${selectedFile.name} (${(selectedFile.size / 1024).toFixed(2)} KB)`,
+          input: `Analyzed File: ${selectedFile.name}`,
           output: report
         }, ...prev]);
         
-        return;
-      }
-
-      if (!apiBackendUrl) {
-        // Use Frontend SDK
-        const apiKey = process.env.GEMINI_API_KEY;
-        if (!apiKey) {
-          throw new Error('GEMINI_API_KEY is not available in the environment.');
-        }
-        
-        const ai = new GoogleGenAI({ apiKey });
-        const prompt = `
-          You are an expert SRE and Log Analysis Agent. 
-          Analyze the following system logs and provide a concise, high-impact report.
-          
-          User Context/Instructions: ${description || "General analysis"}
-          
-          Logs:
-          ${logStream.slice(0, 20000)}
-          
-          Provide the report in Markdown format. 
-          Focus on:
-          1. Detected Anomalies/Errors
-          2. Potential Root Causes
-          3. Recommended Actions
-        `;
-
-        const response = await ai.models.generateContent({
-          model: "gemini-3-flash-preview",
-          contents: prompt
-        });
-
-        const report = response.text || "No analysis generated.";
-        
-        setAnalysisResult(report);
+        setAgents(prev => prev.map(a => a.isActive ? { ...a, status: 'idle' } : a));
         setIsAnalyzing(false);
-
-        // Add to history
-        setAnalysisHistory(prev => [{
-          id: `ANL-${Date.now()}`,
-          timestamp: new Date().toISOString(),
-          input: logStream,
-          output: report
-        }, ...prev]);
-        
         return;
       }
 
-      const targetUrl = `${apiBackendUrl.replace(/\/$/, '')}/api/analyze`;
-      const payload = {
-        logs: logStream,
-        description: description || "Analysis request"
-      };
+      // 2. Handle Multi-Agent Analysis
+      const analysisTasks = activeAgents.map(async (agent) => {
+        const agentBackend = agent.backendUrl || preferredBackend;
+        
+        if (!agentBackend) {
+          // Fallback to frontend SDK if no backend
+          const apiKey = process.env.GEMINI_API_KEY;
+          if (!apiKey) return `[${agent.name}] Error: No API key for specialized analysis.`;
+          
+          const ai = new GoogleGenAI({ apiKey });
+          const prompt = `Specialized Analysis for ${agent.name}:\n${description}\n\nLogs:\n${logStream.slice(0, 10000)}`;
+          const res = await ai.models.generateContent({ model: agent.model || "gemini-3-flash-preview", contents: prompt });
+          return `### ${agent.name}\n\n${res.text || "No analysis generated."}`;
+        }
 
-      setLastTriggeredApi({
-        url: targetUrl,
-        payload: payload
+        const targetUrl = `${agentBackend.replace(/\/$/, '')}/api/analyze`;
+        try {
+          const res = await fetch(targetUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ logs: logStream, description: description || `Specialized analysis for ${agent.name}` })
+          });
+          const data = await res.json();
+          const report = data.report || data.analysis || JSON.stringify(data, null, 2);
+          return `### ${agent.name}\n\n${report}`;
+        } catch (err) {
+          return `### ${agent.name}\n\nFailed to reach backend system: ${err instanceof Error ? err.message : 'Unknown error'}`;
+        }
       });
 
-      const response = await fetch(targetUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload)
-      });
-
-      setLastTriggeredApi(prev => prev ? { 
-        ...prev, 
-        status: response.status 
-      } : null);
-
-      if (!response.ok) {
-        throw new Error(`Analysis request failed with status ${response.status}`);
-      }
-
-      const data = await response.json();
-      setLastTriggeredApi(prev => prev ? { 
-        ...prev, 
-        response: data 
-      } : null);
-      setShowApiNotification(true);
-
-      const report = data.report || data.analysis || data.result || JSON.stringify(data, null, 2);
+      const results = await Promise.all(analysisTasks);
+      const combinedReport = results.join('\n\n---\n\n');
       
-      setAnalysisResult(report);
-      setIsAnalyzing(false);
-
-      // Add to history
+      setAnalysisResult(combinedReport);
       setAnalysisHistory(prev => [{
-        id: `ANL-${Date.now()}`,
+        id: `ANL-MULTI-${Date.now()}`,
         timestamp: new Date().toISOString(),
-        input: logStream,
-        output: report
+        input: logStream.slice(0, 500) + '...',
+        output: combinedReport
       }, ...prev]);
+
+      setAgents(prev => prev.map(a => a.isActive ? { ...a, status: 'idle' } : a));
+      setIsAnalyzing(false);
     } catch (err) {
-      console.error('Log analysis failed:', err);
-      setAnalysisResult(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      console.error('Analysis failed:', err);
+      setAnalysisResult(`### Analysis Failed\n\n${err instanceof Error ? err.message : 'An unexpected error occurred during multi-agent orchestration.'}`);
+      setAgents(prev => prev.map(a => ({ ...a, status: 'idle' })));
       setIsAnalyzing(false);
     }
   };
-
   const [failedJenkinsJobs, setFailedJenkinsJobs] = useState<any[]>([]);
   const [isScrapingJenkins, setIsScrapingJenkins] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -235,12 +252,20 @@ export default function App() {
         // Then fetch supported models
         const modelsRes = await fetch('https://openrouter.ai/api/v1/models');
         const modelsData = await modelsRes.json();
-        const models = modelsData.data || [];
+        const models = (modelsData.data || []).sort((a: any, b: any) => {
+          const nameA = a.name || a.id;
+          const nameB = b.name || b.id;
+          return nameA.localeCompare(nameB);
+        });
         setSupportedModels(models);
 
         // If no model was saved in config, use the first available model as fallback
         if (!savedModel && models.length > 0) {
-          setSelectedModel(models[0].id);
+          const firstModel = models[0].id;
+          setSelectedModel(firstModel);
+          setAgentModel(firstModel);
+        } else if (savedModel) {
+          setAgentModel(savedModel);
         }
         
         setLoading(false);
@@ -282,40 +307,43 @@ export default function App() {
   const [selectedTool, setSelectedTool] = useState('');
   const [sourceName, setSourceName] = useState('');
   const [agentName, setAgentName] = useState('');
-  const [agentRole, setAgentRole] = useState('');
+  const [agentModel, setAgentModel] = useState('');
   const [agentBackendUrl, setAgentBackendUrl] = useState('');
-  const [agentAvatar, setAgentAvatar] = useState('🤖');
   const [configName, setConfigName] = useState('');
   const [configUrl, setConfigUrl] = useState('');
   const [configUser, setConfigUser] = useState('');
   const [configKey, setConfigKey] = useState('');
 
+  const [stayInAddAgent, setStayInAddAgent] = useState(false);
+
   const handleAddAgent = () => {
-    if (!agentName || !agentRole) return;
-    
-    // Duplicate check: Verify if the URL is already used by another agent
-    if (agentBackendUrl && agents.some(a => a.backendUrl === agentBackendUrl)) {
-      alert('An agent with this Backend URL already exists.');
-      return;
-    }
+    if (!agentName) return;
     
     const newAgent: RCAAgent = {
-      id: `agent-${Date.now()}`,
+      id: `agent-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       name: agentName,
-      role: agentRole,
-      avatar: agentAvatar,
       status: 'idle',
       isActive: true,
-      backendUrl: agentBackendUrl,
+      isDefault: agents.length === 0, // Make first agent default automatically
+      backendUrl: agentBackendUrl || apiBackendUrl, // Fallback to global backend if empty
+      model: agentModel || selectedModel,
       findings: []
     };
 
-    setAgents([...agents, newAgent]);
-    setShowAddAgent(false);
+    setAgents(prev => [...prev, newAgent]);
+    
+    if (!stayInAddAgent) {
+      setShowAddAgent(false);
+    } else {
+      // If staying, maybe show a brief success indicator?
+      // For now just clearing name is enough to let them type another
+      console.log('Agent added, staying in modal');
+    }
+    
+    // Clear fields
     setAgentName('');
-    setAgentRole('');
+    setAgentModel(selectedModel || (supportedModels.length > 0 ? supportedModels[0].id : ''));
     setAgentBackendUrl('');
-    setAgentAvatar('🤖');
   };
 
   const deleteAgent = (id: string) => {
@@ -339,21 +367,21 @@ export default function App() {
 
     setAgents(agents.map(a => 
       a.id === configuringAgentId 
-        ? { ...a, name: agentName, role: agentRole, backendUrl: agentBackendUrl } 
+        ? { ...a, name: agentName, backendUrl: agentBackendUrl, model: agentModel } 
         : a
     ));
     setShowAgentConfigModal(false);
     setConfiguringAgentId(null);
     setAgentName('');
-    setAgentRole('');
+    setAgentModel(selectedModel);
     setAgentBackendUrl('');
   };
 
   const openAgentConfig = (agent: RCAAgent) => {
     setConfiguringAgentId(agent.id);
     setAgentName(agent.name);
-    setAgentRole(agent.role);
     setAgentBackendUrl(agent.backendUrl || '');
+    setAgentModel(agent.model || selectedModel);
     setShowAgentConfigModal(true);
   };
 
@@ -527,7 +555,7 @@ export default function App() {
                 <h3 className="text-lg font-bold tracking-tight text-slate-900">Deploy New Agent</h3>
                 <p className="text-xs text-slate-400 font-medium">Configure specialized AI to monitor your stack</p>
               </div>
-              <div className="p-6 space-y-6">
+              <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto custom-scrollbar">
                 <div className="space-y-4">
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Agent Name</label>
@@ -540,39 +568,65 @@ export default function App() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Specialized Role</label>
-                    <input 
-                      type="text" 
-                      value={agentRole}
-                      onChange={(e) => setAgentRole(e.target.value)}
-                      placeholder="e.g. Memory Leak Detector"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all font-mono"
-                    />
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Model Engine</label>
+                    <select
+                      value={agentModel}
+                      onChange={(e) => setAgentModel(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20viewBox%3D%220%200%2020%2020%22%3E%3Cpath%20stroke%3D%22%236b7280%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%20stroke-width%3D%221.5%22%20d%3D%22m6%208%204%204%204-4%22%2F%3E%3C%2Fsvg%3E')] bg-[length:1.25rem_1.25rem] bg-[right_0.5rem_center] bg-no-repeat pr-10"
+                    >
+                      {supportedModels.map(model => (
+                        <option key={model.id} value={model.id}>{model.name || model.id}</option>
+                      ))}
+                    </select>
+                    {supportedModels.find(m => m.id === agentModel) && (
+                      <div className="mt-2 p-3 bg-slate-50/50 border border-slate-100 rounded-xl space-y-2">
+                        <div className="flex justify-between items-center text-[10px]">
+                          <span className="text-slate-400 font-bold uppercase tracking-widest">Context Window</span>
+                          <span className="text-slate-700 font-mono font-bold">
+                            {(supportedModels.find(m => m.id === agentModel)?.context_length || 0).toLocaleString()} tokens
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center text-[10px]">
+                          <span className="text-slate-400 font-bold uppercase tracking-widest">Pricing / 1M Tokens</span>
+                          <div className="text-right">
+                            <span className="text-slate-700 font-mono font-bold">
+                              ${(Number(supportedModels.find(m => m.id === agentModel)?.pricing?.prompt || 0) * 1000000).toFixed(2)} <span className="text-[9px] text-slate-400">in</span>
+                            </span>
+                            <span className="mx-1 text-slate-300">|</span>
+                            <span className="text-slate-700 font-mono font-bold">
+                              ${(Number(supportedModels.find(m => m.id === agentModel)?.pricing?.completion || 0) * 1000000).toFixed(2)} <span className="text-[9px] text-slate-400">out</span>
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Backend System URL (Python)</label>
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Backend System URL</label>
                     <input 
                       type="text" 
                       value={agentBackendUrl}
                       onChange={(e) => setAgentBackendUrl(e.target.value)}
-                      placeholder="https://agent-api.internal.org/analyze"
+                      placeholder="https://agent-api.internal.org"
                       className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all font-mono"
                     />
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Avatar / Persona</label>
-                    <div className="flex gap-3 pt-1">
-                      {['🤖', '🛰️', '💾', '🛡️', '🧠', '🔬'].map(emoji => (
-                        <button 
-                          key={emoji}
-                          onClick={() => setAgentAvatar(emoji)}
-                          className={`w-10 h-10 rounded-lg flex items-center justify-center text-xl border transition-all ${agentAvatar === emoji ? 'bg-blue-50 border-blue-200 shadow-inner' : 'bg-slate-50 border-slate-100 hover:bg-white hover:border-slate-300'}`}
-                        >
-                          {emoji}
-                        </button>
-                      ))}
+                </div>
+
+                <div className="flex items-center gap-3 py-2 px-1">
+                  <label className="flex items-center gap-2 cursor-pointer group">
+                    <div className="relative">
+                      <input 
+                        type="checkbox" 
+                        checked={stayInAddAgent}
+                        onChange={(e) => setStayInAddAgent(e.target.checked)}
+                        className="sr-only"
+                      />
+                      <div className={`w-8 h-4 rounded-full transition-colors ${stayInAddAgent ? 'bg-blue-500' : 'bg-slate-200'}`} />
+                      <div className={`absolute left-0.5 top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${stayInAddAgent ? 'translate-x-4' : ''} shadow-sm`} />
                     </div>
-                  </div>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest group-hover:text-slate-600 transition-colors cursor-pointer">Add another agent after deploying</span>
+                  </label>
                 </div>
 
                 <div className="flex gap-3 pt-2">
@@ -584,7 +638,7 @@ export default function App() {
                   </button>
                   <button 
                     onClick={handleAddAgent}
-                    disabled={!agentName || !agentRole}
+                    disabled={!agentName}
                     className="flex-1 py-3 bg-slate-900 text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-slate-800 disabled:opacity-50 transition-all shadow-lg shadow-slate-900/10"
                   >
                     Deploy Agent
@@ -629,16 +683,41 @@ export default function App() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Specialized Role</label>
-                    <input 
-                      type="text" 
-                      value={agentRole}
-                      onChange={(e) => setAgentRole(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all font-mono"
-                    />
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Model Engine</label>
+                    <select
+                      value={agentModel}
+                      onChange={(e) => setAgentModel(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20viewBox%3D%220%200%2020%2020%22%3E%3Cpath%20stroke%3D%22%236b7280%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%20stroke-width%3D%221.5%22%20d%3D%22m6%208%204%204%204-4%22%2F%3E%3C%2Fsvg%3E')] bg-[length:1.25rem_1.25rem] bg-[right_0.5rem_center] bg-no-repeat pr-10"
+                    >
+                      {supportedModels.map(model => (
+                        <option key={model.id} value={model.id}>{model.name || model.id}</option>
+                      ))}
+                    </select>
+                    {supportedModels.find(m => m.id === agentModel) && (
+                      <div className="mt-2 p-3 bg-slate-50/50 border border-slate-100 rounded-xl space-y-2">
+                        <div className="flex justify-between items-center text-[10px]">
+                          <span className="text-slate-400 font-bold uppercase tracking-widest">Context Window</span>
+                          <span className="text-slate-700 font-mono font-bold">
+                            {(supportedModels.find(m => m.id === agentModel)?.context_length || 0).toLocaleString()} tokens
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center text-[10px]">
+                          <span className="text-slate-400 font-bold uppercase tracking-widest">Pricing / 1M Tokens</span>
+                          <div className="text-right">
+                            <span className="text-slate-700 font-mono font-bold">
+                              ${(Number(supportedModels.find(m => m.id === agentModel)?.pricing?.prompt || 0) * 1000000).toFixed(2)} <span className="text-[9px] text-slate-400">in</span>
+                            </span>
+                            <span className="mx-1 text-slate-300">|</span>
+                            <span className="text-slate-700 font-mono font-bold">
+                              ${(Number(supportedModels.find(m => m.id === agentModel)?.pricing?.completion || 0) * 1000000).toFixed(2)} <span className="text-[9px] text-slate-400">out</span>
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Backend System URL (Python)</label>
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Backend System URL</label>
                     <input 
                       type="text" 
                       value={agentBackendUrl}
@@ -864,8 +943,122 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+      
+      {/* Diagnostics Modal */}
+      <AnimatePresence>
+        {showDiagnosticsModal && diagnosticsResult && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowDiagnosticsModal(false)}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-xl bg-white rounded-3xl shadow-2xl overflow-hidden"
+            >
+              <div className="p-8 border-b border-slate-100 flex items-center justify-between bg-white">
+                <div>
+                  <div className="flex items-center gap-3 mb-1">
+                    <h3 className="text-xl font-bold tracking-tight text-slate-900">{diagnosticsResult.agent.name}</h3>
+                  </div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Health Diagnostic Report</p>
+                </div>
+                <button 
+                  onClick={() => setShowDiagnosticsModal(false)}
+                  className="w-10 h-10 flex items-center justify-center rounded-full bg-slate-50 text-slate-400 hover:bg-slate-100 hover:text-slate-900 transition-all border border-slate-100"
+                >
+                  <X size={20} />
+                </button>
+              </div>
 
-      {/* Ingest Modal */}
+              <div className="p-8 max-h-[70vh] overflow-y-auto custom-scrollbar bg-white">
+                <div className={`mb-8 p-4 rounded-2xl border flex items-center gap-4 ${diagnosticsResult.success ? 'bg-green-50 border-green-100' : 'bg-red-50 border-red-100'}`}>
+                  <div className={`w-12 h-12 rounded-full flex items-center justify-center ${diagnosticsResult.success ? 'bg-green-500' : 'bg-red-500'} text-white shadow-lg`}>
+                    {diagnosticsResult.success ? <CheckCircle2 size={24} /> : <AlertTriangle size={24} />}
+                  </div>
+                  <div>
+                    <h4 className={`font-bold text-sm ${diagnosticsResult.success ? 'text-green-800' : 'text-red-800'}`}>
+                      {diagnosticsResult.success ? 'System Operational' : 'Critical Issue Detected'}
+                    </h4>
+                    <p className={`text-xs ${diagnosticsResult.success ? 'text-green-600/80' : 'text-red-600/80'} font-medium`}>
+                      {diagnosticsResult.status}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-6">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Last Checked</p>
+                      <p className="text-sm font-mono font-bold text-slate-700">{diagnosticsResult.timestamp}</p>
+                    </div>
+                    <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Response Code</p>
+                      <p className="text-sm font-mono font-bold text-slate-700">
+                        {diagnosticsResult.success ? '200 OK' : 'ERR CONNECTION'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                       <Terminal size={12} />
+                       Payload Detail (Human Readable)
+                    </p>
+                    <div className="p-6 bg-slate-900 rounded-2xl border border-slate-800 text-slate-300 font-mono text-xs leading-relaxed overflow-x-auto shadow-inner">
+                      {diagnosticsResult.details ? (
+                        <div className="space-y-4">
+                          {Object.entries(diagnosticsResult.details).map(([key, value]) => (
+                            <div key={key} className="border-b border-slate-800 pb-2 last:border-0 last:pb-0">
+                              <span className="text-blue-400 font-bold">{key}:</span>{' '}
+                              <span className={typeof value === 'object' ? 'text-slate-500' : 'text-green-400'}>
+                                {typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)}
+                              </span>
+                            </div>
+                          ))}
+                          {Object.keys(diagnosticsResult.details).length === 0 && (
+                            <span className="text-slate-500 italic">No additional metadata provided</span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-slate-500 italic">No health data body returned from service</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="p-4 bg-blue-50/50 border border-blue-100 rounded-2xl">
+                    <div className="flex gap-3">
+                       <ShieldCheck className="text-blue-500 flex-shrink-0" size={18} />
+                       <div>
+                         <p className="text-[10px] font-bold text-blue-900 uppercase tracking-widest mb-1">Security Audit</p>
+                         <p className="text-xs text-blue-800/70 font-medium leading-relaxed">
+                           Connection with <strong>{diagnosticsResult.agent.name}</strong> is verified via end-to-end encryption. 
+                           Backend URL <code>{diagnosticsResult.agent.backendUrl}</code> is reachable.
+                         </p>
+                       </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end">
+                <button 
+                  onClick={() => setShowDiagnosticsModal(false)}
+                  className="px-8 py-3 bg-slate-900 text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-slate-800 transition-all shadow-lg shadow-slate-900/10"
+                >
+                  Dismiss Report
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {showIngest && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -1020,7 +1213,7 @@ export default function App() {
               <div className="flex gap-2 items-center px-3 py-1 bg-purple-50 rounded-md border border-purple-100">
                 <Cpu size={12} className="text-purple-500" />
                 <span className="text-[10px] font-bold text-purple-700 uppercase tracking-widest">
-                  Model: {selectedModel || 'Detecting...'}
+                  Model: {agents.find(a => a.isDefault)?.model || selectedModel || 'Detecting...'}
                 </span>
               </div>
             </div>
@@ -1061,7 +1254,70 @@ export default function App() {
                 exit={{ opacity: 0, y: -10 }}
                 className="max-w-6xl mx-auto space-y-8"
               >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-2xl font-black tracking-tight text-slate-800">Root Cause Command Center</h2>
+                    <p className="text-sm text-slate-500 font-medium tracking-tight">Autonomous synthesis of distributed system health.</p>
+                  </div>
+                  <div className="flex gap-3">
+                    <button 
+                      onClick={() => setShowAddAgent(true)}
+                      className="px-4 py-2 bg-slate-900 text-white rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2 shadow-lg shadow-slate-900/10 hover:bg-slate-800 transition-all"
+                    >
+                      <Plus size={16} /> Deploy New Agent
+                    </button>
+                    <button 
+                      onClick={handleSaveToXml}
+                      disabled={isSaving}
+                      className="px-4 py-2 border border-slate-200 text-slate-600 rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2 hover:bg-slate-50 transition-all disabled:opacity-50"
+                    >
+                      <Save size={16} className={isSaving ? 'animate-pulse' : ''} />
+                      {isSaving ? 'Saving...' : 'Save Configuration'}
+                    </button>
+                  </div>
+                </div>
+
                 {/* Stats Cards */}
+                {agents.length === 0 && (
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="p-10 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-3xl shadow-xl shadow-blue-500/20 text-white relative overflow-hidden"
+                  >
+                    {/* Background decoration */}
+                    <div className="absolute top-0 right-0 -translate-y-1/4 translate-x-1/4 opacity-10">
+                      <Cpu size={300} strokeWidth={1} />
+                    </div>
+                    
+                    <div className="relative z-10 max-w-2xl">
+                      <div className="inline-flex items-center gap-2 px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-[10px] font-bold uppercase tracking-widest mb-6 border border-white/20">
+                        <Activity size={12} /> System Initialization Required
+                      </div>
+                      <h2 className="text-4xl font-black tracking-tight mb-4 leading-tight">
+                        Deploy your first <br />Autonomous Agent
+                      </h2>
+                      <p className="text-blue-100 text-lg font-medium mb-8 leading-relaxed">
+                        To begin automated log processing and root cause analysis, you need to configure at least one diagnostic agent. 
+                        Agents specialize in scanning specific services and reporting findings in real-time.
+                      </p>
+                      <div className="flex gap-4">
+                        <button 
+                          onClick={() => setShowAddAgent(true)}
+                          className="px-8 py-4 bg-white text-blue-600 rounded-2xl font-bold text-sm uppercase tracking-widest hover:bg-blue-50 transition-all shadow-lg flex items-center gap-3"
+                        >
+                          <Plus size={20} /> Create New Agent
+                        </button>
+                        <button 
+                          onClick={() => setActiveTab('agents')}
+                          className="px-8 py-4 bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl font-bold text-sm uppercase tracking-widest hover:bg-white/20 transition-all"
+                        >
+                          View Agent Registry
+                        </button>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+
                 <div className="grid grid-cols-4 gap-6">
                   <StatCard 
                     label="Total Active" 
@@ -1123,12 +1379,12 @@ export default function App() {
                     <div className="space-y-6">
                       {agents.filter(a => a.isActive && a.status === 'analyzing').map(agent => (
                         <div key={agent.id} className="flex gap-5">
-                          <div className="w-12 h-12 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center text-2xl shrink-0">
-                            {agent.avatar}
+                          <div className="w-12 h-12 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center text-2xl shrink-0 text-blue-500">
+                            <Cpu size={24} />
                           </div>
                           <div className="flex-1 space-y-3">
                             <div className="flex items-center justify-between">
-                              <span className="text-sm font-semibold text-slate-900">{agent.name} <span className="text-slate-400 font-medium ml-2 text-xs">({agent.role})</span></span>
+                              <span className="text-sm font-semibold text-slate-900">{agent.name}</span>
                               <span className="text-[10px] font-bold text-blue-500 animate-pulse tracking-widest uppercase">Analyzing...</span>
                             </div>
                             <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
@@ -1181,9 +1437,9 @@ export default function App() {
                     </button>
                     <button 
                       onClick={handleAnalyzeLogs}
-                      disabled={isAnalyzing || (!logStream && !selectedFile) || !isAnalysisAgentAdded}
+                      disabled={isAnalyzing || (!logStream && !selectedFile) || !hasActiveAgent}
                       className="px-4 py-2 bg-slate-900 text-white rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2 shadow-lg shadow-slate-900/10 disabled:opacity-50"
-                      title={!isAnalysisAgentAdded ? "Please add at least one agent to proceed" : ""}
+                      title={agents.length === 0 ? "Please add at least one agent to proceed" : (!hasActiveAgent ? "Please activate your analysis agent to proceed" : "")}
                     >
                       {isAnalyzing ? <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Plus size={14} />} 
                       Analyze Logs
@@ -1313,8 +1569,8 @@ export default function App() {
                            <span className="text-[10px] text-blue-400 font-bold uppercase tracking-widest animate-pulse">Agent is processing data nodes...</span>
                         </div>
                       ) : analysisResult ? (
-                        <div className="font-mono text-xs text-blue-100/90 whitespace-pre-wrap leading-relaxed selection:bg-blue-500/30">
-                          {analysisResult}
+                        <div className="prose prose-invert prose-xs max-w-none text-blue-100/90 leading-relaxed selection:bg-blue-500/30 markdown-container">
+                          <ReactMarkdown>{analysisResult}</ReactMarkdown>
                         </div>
                       ) : (
                         <div className="flex flex-col items-center justify-center p-12 text-slate-600 italic gap-4 opacity-40">
@@ -1431,8 +1687,8 @@ export default function App() {
                                       Copy Report
                                     </button>
                                   </div>
-                                  <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 font-mono text-[11px] text-blue-100/90 max-h-[400px] overflow-y-auto whitespace-pre-wrap custom-scrollbar leading-relaxed">
-                                    {item.output}
+                                  <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 text-[11px] text-blue-100/90 max-h-[400px] overflow-y-auto custom-scrollbar leading-relaxed markdown-container">
+                                    <ReactMarkdown>{item.output}</ReactMarkdown>
                                   </div>
                                 </div>
                               </div>
@@ -1475,8 +1731,26 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-8">
-                  {agents.map(agent => (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                  {agents.length === 0 ? (
+                    <div className="col-span-full py-20 bg-white border border-slate-200 border-dashed rounded-3xl flex flex-col items-center justify-center gap-6">
+                      <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center text-slate-300">
+                        <Cpu size={40} />
+                      </div>
+                      <div className="text-center space-y-2">
+                        <h3 className="text-xl font-black text-slate-800 tracking-tight">No Agents Deployed</h3>
+                        <p className="text-sm text-slate-500 font-medium max-w-xs mx-auto">
+                          Autonomous entities are required to monitor system health and process diagnostics.
+                        </p>
+                      </div>
+                      <button 
+                        onClick={() => setShowAddAgent(true)}
+                        className="px-8 py-3 bg-slate-900 text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-slate-800 shadow-lg"
+                      >
+                         Configure First Agent
+                      </button>
+                    </div>
+                  ) : agents.map(agent => (
                     <div key={agent.id} className={`bg-white border rounded-2xl p-8 transition-all group shadow-sm hover:shadow-md relative overflow-hidden ${agent.isActive ? 'border-slate-200 hover:border-blue-500/50' : 'border-slate-100 opacity-60'}`}>
                       {!agent.isActive && (
                         <div className="absolute top-0 right-0 p-2">
@@ -1486,7 +1760,7 @@ export default function App() {
                       
                       <div className="flex justify-between items-start mb-6">
                         <div className={`w-16 h-16 rounded-2xl border flex items-center justify-center text-3xl group-hover:scale-110 transition-transform ${agent.isActive ? 'bg-slate-50 border-slate-100' : 'bg-slate-100 border-slate-200'}`}>
-                          {agent.avatar}
+                          <Cpu size={32} className={agent.isActive ? 'text-blue-500' : 'text-slate-400'} />
                         </div>
                         <div className="flex gap-2">
                           <button 
@@ -1514,7 +1788,6 @@ export default function App() {
                       </div>
 
                       <h3 className="font-bold text-xl tracking-tight text-slate-900">{agent.name}</h3>
-                      <p className="text-xs font-semibold text-blue-600 uppercase tracking-wider mt-1 mb-2">{agent.role}</p>
                       
                       {agent.backendUrl && (
                         <div className="mb-6 flex items-center gap-2 px-2 py-1 bg-slate-50 border border-slate-100 rounded text-[9px] text-slate-400 font-mono overflow-hidden whitespace-nowrap text-ellipsis">
@@ -1532,19 +1805,29 @@ export default function App() {
                          </div>
                       </div>
 
-                      <div className="mt-8 pt-6 border-t border-slate-50 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
+                      <div className="mt-8 pt-6 border-t border-slate-50 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
                           <div className={`w-2 h-2 rounded-full ${agent.isActive ? 'bg-green-500' : 'bg-slate-300'}`}></div>
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                            {agent.isActive ? agent.status : 'Inactive'}
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate">
+                            {agent.isActive ? (diagnosticsMap[agent.id]?.status || agent.status) : 'Inactive'}
                           </span>
                         </div>
-                        <button 
-                          disabled={!agent.isActive}
-                          className="px-4 py-2 border border-slate-200 rounded-lg text-[10px] font-bold uppercase tracking-widest text-slate-600 hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-600 disabled:hover:border-slate-200"
-                        >
-                          Diagnostics
-                        </button>
+                        <div className="flex gap-2 shrink-0">
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); handleSetDefaultAgent(agent.id); }}
+                            className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${agent.isDefault ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                          >
+                            {agent.isDefault ? 'Primary' : 'Set Default'}
+                          </button>
+                          <button 
+                            disabled={!agent.isActive || !agent.backendUrl || diagnosticsMap[agent.id]?.loading}
+                            onClick={(e) => { e.stopPropagation(); handleCheckDiagnostics(agent); }}
+                            className="px-3 py-1.5 border border-slate-200 rounded-lg text-[9px] font-black uppercase tracking-widest text-slate-600 hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-600 disabled:hover:border-slate-200 flex items-center gap-1.5"
+                          >
+                            {diagnosticsMap[agent.id]?.loading && <div className="w-2 h-2 border-2 border-slate-400 border-t-white rounded-full animate-spin" />}
+                            Diagnostics
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -2147,8 +2430,8 @@ function IncidentDetailView({ incident, agents, onClose }: { incident: Incident,
             <div className="mt-8 flex gap-5 items-center">
                <div className="flex -space-x-3">
                  {agents.filter(a => a.isActive).map(agent => (
-                   <div key={agent.id} className="w-10 h-10 rounded-full border-4 border-white bg-slate-50 flex items-center justify-center text-lg shadow-sm" title={agent.name}>
-                     {agent.avatar}
+                   <div key={agent.id} className="w-10 h-10 rounded-full border-4 border-white bg-slate-50 flex items-center justify-center text-blue-500 shadow-sm" title={agent.name}>
+                     <Cpu size={16} />
                    </div>
                  ))}
                  {agents.filter(a => a.isActive).length === 0 && (
@@ -2169,7 +2452,7 @@ function IncidentDetailView({ incident, agents, onClose }: { incident: Incident,
                  <div key={agent.id} className="space-y-4">
                    <div className="flex items-center justify-between">
                      <span className="text-sm font-bold flex items-center gap-3 text-slate-900">
-                       <span className="w-8 h-8 rounded-lg bg-slate-50 flex items-center justify-center text-base border border-slate-100">{agent.avatar}</span> {agent.name}
+                       <span className="w-8 h-8 rounded-lg bg-slate-50 flex items-center justify-center text-blue-500 border border-slate-100"><Cpu size={16} /></span> {agent.name}
                      </span>
                      <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-widest ${agent.status === 'complete' ? 'bg-green-50 text-green-600' : 'bg-blue-50 text-blue-600 animate-pulse'}`}>
                        {agent.status}

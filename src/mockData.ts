@@ -31,8 +31,6 @@ export const MOCK_AGENTS: RCAAgent[] = [
   {
     id: 'agent-1',
     name: 'SRE-Bot Alpha',
-    role: 'Infrastructure Specialist',
-    avatar: '🤖',
     status: 'analyzing',
     isActive: true,
     findings: [
@@ -43,8 +41,6 @@ export const MOCK_AGENTS: RCAAgent[] = [
   {
     id: 'agent-2',
     name: 'NetScan Omega',
-    role: 'Network Flow Analyst',
-    avatar: '🛰️',
     status: 'complete',
     isActive: true,
     findings: [
@@ -55,8 +51,6 @@ export const MOCK_AGENTS: RCAAgent[] = [
   {
     id: 'agent-3',
     name: 'DB-Sentinel',
-    role: 'Storage & DB Auditor',
-    avatar: '💾',
     status: 'idle',
     isActive: true,
     findings: [
