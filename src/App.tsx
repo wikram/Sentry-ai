@@ -28,7 +28,11 @@ import {
   X,
   Upload,
   Send,
-  Database
+  Database,
+  Lock,
+  User,
+  LogIn,
+  LogOut
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
@@ -37,6 +41,8 @@ import { Incident, RCAAgent } from './types';
 import { MOCK_INCIDENTS } from './mockData';
 
 export default function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [user, setUser] = useState<{ email: string } | null>(null);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'history' | 'log-analyzer' | 'agents' | 'data-sources' | 'integrations' | 'models' | 'settings'>('dashboard');
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
   const [sources, setSources] = useState<any[]>([]);
@@ -44,8 +50,6 @@ export default function App() {
   const [supportedModels, setSupportedModels] = useState<any[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>('');
   const [apiBackendUrl, setApiBackendUrl] = useState<string>('');
-  const [lastTriggeredApi, setLastTriggeredApi] = useState<{ url: string, payload: any, response?: any, status?: number } | null>(null);
-  const [showApiNotification, setShowApiNotification] = useState(false);
   const [logStream, setLogStream] = useState<string>('');
   const [description, setDescription] = useState<string>('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -159,20 +163,10 @@ export default function App() {
 
         const targetUrl = `${baseUrl.replace(/\/$/, '')}/api/analyze-file`;
         
-        setLastTriggeredApi({
-          url: targetUrl,
-          payload: { fileName: selectedFile.name, description }
-        });
-        setShowApiNotification(true);
-
         const response = await fetch(targetUrl, { method: 'POST', body: formData });
         
-        setLastTriggeredApi(prev => prev ? { ...prev, status: response.status } : null);
-
         if (!response.ok) throw new Error(`File analysis failed: ${response.status}`);
         const data = await response.json();
-
-        setLastTriggeredApi(prev => prev ? { ...prev, response: data } : null);
 
         const report = data.report || data.analysis || JSON.stringify(data, null, 2);
         
@@ -207,10 +201,6 @@ export default function App() {
         const targetUrl = `${agentBackend.replace(/\/$/, '')}/api/analyze`;
         const payload = { logs: logStream, description: description || `Specialized analysis for ${agent.name}` };
         
-        // Show API notification for each backend hit (will overlap/update quickly for multi-agent)
-        setLastTriggeredApi({ url: targetUrl, payload });
-        setShowApiNotification(true);
-
         try {
           const res = await fetch(targetUrl, {
             method: 'POST',
@@ -218,19 +208,10 @@ export default function App() {
             body: JSON.stringify(payload)
           });
           
-          const status = res.status;
           const data = await res.json();
-          
-          setLastTriggeredApi(prev => 
-            prev?.url === targetUrl ? { ...prev, status, response: data } : prev
-          );
-
           const report = data.report || data.analysis || JSON.stringify(data, null, 2);
           return `### ${agent.name}\n\n${report}`;
         } catch (err) {
-          setLastTriggeredApi(prev => 
-            prev?.url === targetUrl ? { ...prev, status: 500, response: { error: err instanceof Error ? err.message : 'Fetch failed' } } : prev
-          );
           return `### ${agent.name}\n\nFailed to reach backend system: ${err instanceof Error ? err.message : 'Unknown error'}`;
         }
       });
@@ -422,32 +403,13 @@ export default function App() {
       : null;
 
     if (externalEndpoint && selectedModel) {
-      setLastTriggeredApi({
-        url: externalEndpoint,
-        payload: { model: selectedModel }
-      });
-      setShowApiNotification(true);
-
       // Execute the external API call
       fetch(externalEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: selectedModel })
-      }).then(async (res) => {
-        const data = await res.json().catch(() => ({}));
-        setLastTriggeredApi(prev => prev ? { 
-          ...prev, 
-          status: res.status,
-          response: data 
-        } : null);
-        // Auto-hide after 10 seconds to allow reading the response
-        setTimeout(() => setShowApiNotification(false), 10000);
       }).catch(err => {
-        setLastTriggeredApi(prev => prev ? { 
-          ...prev, 
-          status: 500,
-          response: { error: 'Failed to connect to external endpoint', message: err.message } 
-        } : null);
+        console.error('Failed to notify external endpoint:', err);
       });
     }
 
@@ -559,6 +521,10 @@ export default function App() {
 
   const isDatabase = (type: string) => ['postgresql', 'mysql', 'pinecone', 'weaviate', 'milvus', 'chromadb'].includes(type);
   const currentSource = configuringSourceId ? sources.find(s => s.id === configuringSourceId) : null;
+
+  if (!isAuthenticated) {
+    return <Login onLogin={(user) => { setIsAuthenticated(true); setUser(user); }} />;
+  }
 
   return (
     <div className="flex h-screen bg-slate-50 text-slate-900 font-sans overflow-hidden selection:bg-blue-500/30">
@@ -1205,12 +1171,18 @@ export default function App() {
           />
         </nav>
 
-        <div className="p-4 mt-auto border-t border-slate-100 bg-slate-50/50">
+        <div className="p-4 mt-auto border-t border-slate-100 bg-slate-50/50 space-y-1">
           <NavItem 
             icon={<Settings size={18} />} 
             label="Settings" 
             active={activeTab === 'settings'} 
             onClick={() => setActiveTab('settings')} 
+          />
+          <NavItem 
+            icon={<LogOut size={18} className="text-red-400" />} 
+            label="Sign Out" 
+            active={false} 
+            onClick={() => { setIsAuthenticated(false); setUser(null); }} 
           />
         </div>
       </aside>
@@ -2195,118 +2167,82 @@ export default function App() {
           </AnimatePresence>
         </div>
       </main>
+    </div>
+  );
+}
 
-      <AnimatePresence>
-        {showApiNotification && lastTriggeredApi && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col bg-slate-900 text-white rounded-2xl shadow-2xl border border-white/10"
-            >
-              <div className="px-6 py-4 bg-slate-800/50 border-b border-white/5 flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-blue-500/20 flex items-center justify-center text-blue-400">
-                    <Activity size={18} />
-                  </div>
-                  <div>
-                    <span className="text-xs font-black uppercase tracking-widest text-white/90 block">System API Trace</span>
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">Diagnostic Payload Inspection</span>
-                  </div>
-                </div>
-                <button 
-                  onClick={() => setShowApiNotification(false)} 
-                  className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors text-slate-300"
-                >
-                  <X size={18} />
-                </button>
-              </div>
+function Login({ onLogin }: { onLogin: (user: any) => void }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
 
-              <div className="flex-1 overflow-y-auto p-6 scrollbar-hide space-y-8">
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                  <div className="space-y-4">
-                    <div>
-                      <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 flex items-center gap-2">
-                        <div className="w-1 h-1 rounded-full bg-blue-500" /> Endpoint Details
-                      </div>
-                      <div className="bg-white/5 border border-white/5 rounded-xl p-4 space-y-3">
-                        <div className="flex items-center gap-3">
-                          <span className="px-2 py-1 bg-blue-600 text-white rounded text-[10px] font-black tracking-widest uppercase">POST</span>
-                          <span className="text-sm font-mono text-blue-300 break-all">{lastTriggeredApi.url}</span>
-                        </div>
-                      </div>
-                    </div>
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (email && password) {
+      onLogin({ email });
+    }
+  };
 
-                    <div>
-                      <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 flex items-center gap-2">
-                        <div className="w-1 h-1 rounded-full bg-green-500" /> Request Payload
-                      </div>
-                      <div className="bg-black/40 border border-white/5 rounded-xl p-4 font-mono text-[11px] text-green-400 overflow-x-auto max-h-64 custom-scrollbar">
-                        <pre>{JSON.stringify(lastTriggeredApi.payload, null, 2)}</pre>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-4">
-                    {lastTriggeredApi.response ? (
-                      <div>
-                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <div className="w-1 h-1 rounded-full bg-cyan-500" /> Response Body
-                          </div>
-                          {lastTriggeredApi.status && (
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-black tracking-widest ${lastTriggeredApi.status >= 200 && lastTriggeredApi.status < 300 ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-                              STATUS: {lastTriggeredApi.status}
-                            </span>
-                          )}
-                        </div>
-                        <div className="bg-black/40 border border-white/5 rounded-xl p-4 font-mono text-[11px] text-cyan-400 overflow-x-auto max-h-[22rem] custom-scrollbar">
-                          <pre>{JSON.stringify(lastTriggeredApi.response, null, 2)}</pre>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="h-full flex flex-col items-center justify-center bg-white/5 border border-white/5 border-dashed rounded-xl p-8 text-center gap-4">
-                         <div className="w-12 h-12 rounded-full border-2 border-slate-700 border-t-blue-500 animate-spin" />
-                         <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Awaiting Remote Response...</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="pt-4 border-t border-white/5">
-                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-1 h-1 rounded-full bg-amber-500" /> Replay via CURL
-                    </div>
-                    <button 
-                      onClick={() => {
-                        const curl = `curl -X POST "${lastTriggeredApi.url}" -H "Content-Type: application/json" -d '${JSON.stringify(lastTriggeredApi.payload)}'`;
-                        navigator.clipboard.writeText(curl);
-                      }}
-                      className="text-blue-400 hover:text-blue-300 flex items-center gap-1.5 transition-colors text-[10px] font-bold"
-                    >
-                      <Save size={12} /> COPY COMMAND
-                    </button>
-                  </div>
-                  <div className="bg-black/40 border border-white/5 rounded-xl p-4 font-mono text-[11px] text-amber-400/90 leading-relaxed overflow-x-auto group relative">
-                    <code className="whitespace-pre-wrap">{`curl -X POST "${lastTriggeredApi.url}" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify(lastTriggeredApi.payload)}'`}</code>
-                  </div>
-                  {(lastTriggeredApi.url.includes('localhost') || lastTriggeredApi.url.includes('127.0.0.1')) && (
-                    <div className="mt-4 p-3 bg-amber-500/10 rounded-lg border border-amber-500/20 text-[10px] text-amber-500 font-medium flex items-center gap-2 italic">
-                      <AlertTriangle size={14} /> Security Note: Browser context may restrict requests to local development endpoints due to CORS policies.
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="px-6 py-3 bg-blue-600/10 text-blue-400 text-[10px] font-bold tracking-widest uppercase text-center border-t border-blue-500/10 shrink-0">
-                Direct Integration Trace Mode Active
-              </div>
-            </motion.div>
+  return (
+    <div className="min-h-screen bg-[#020617] flex items-center justify-center p-6 relative overflow-hidden">
+      <div className="absolute top-0 -left-20 w-96 h-96 bg-blue-600/10 rounded-full blur-[120px] animate-pulse" />
+      <div className="absolute bottom-0 -right-20 w-96 h-96 bg-cyan-600/10 rounded-full blur-[120px] animate-pulse delay-700" />
+      
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="w-full max-w-md bg-white rounded-3xl p-10 relative z-10 shadow-2xl border border-slate-200"
+      >
+        <div className="flex flex-col items-center mb-10 text-center">
+          <div className="w-16 h-16 bg-slate-900 rounded-2xl flex items-center justify-center mb-6 shadow-xl border border-white/10">
+            <ShieldAlert size={32} className="text-blue-500" />
           </div>
-        )}
-      </AnimatePresence>
+          <h1 className="text-3xl font-black tracking-tighter text-slate-900 mb-2">RCACENTRAL</h1>
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Autonomous System Governance</p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Terminal ID</label>
+            <div className="relative">
+              <User size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input 
+                type="email" 
+                required
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-12 pr-4 py-3.5 text-sm text-slate-900 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all font-medium"
+                placeholder="operator@rca.central"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Access Protocol</label>
+            <div className="relative">
+              <Lock size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input 
+                type="password" 
+                required
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-12 pr-4 py-3.5 text-sm text-slate-900 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all font-medium"
+                placeholder="••••••••"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+              />
+            </div>
+          </div>
+          <button 
+            type="submit"
+            className="w-full py-4 bg-slate-900 text-white rounded-2xl text-xs font-bold uppercase tracking-[0.25em] shadow-xl shadow-slate-900/20 hover:bg-slate-800 transition-all active:scale-[0.98] flex items-center justify-center gap-3"
+          >
+            Authorize Connection <LogIn size={16} />
+          </button>
+        </form>
+
+        <div className="mt-8 pt-8 border-t border-slate-100 text-center">
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center justify-center gap-2">
+            <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> SECURE LINK ESTABLISHED
+          </p>
+        </div>
+      </motion.div>
     </div>
   );
 }
