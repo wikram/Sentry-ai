@@ -164,9 +164,14 @@ export default function App() {
         const response = await fetch(targetUrl, { method: 'POST', body: formData });
         
         if (!response.ok) throw new Error(`File analysis failed: ${response.status}`);
-        const data = await response.json();
-
-        report = data.report || data.analysis || (typeof data === 'string' ? data : JSON.stringify(data, null, 2));
+        
+        const text = await response.text();
+        try {
+          const data = JSON.parse(text);
+          report = data.report || data.analysis || (typeof data === 'string' ? data : JSON.stringify(data, null, 2));
+        } catch {
+          report = text;
+        }
       } else {
         // 2. Handle Log Stream Analysis
         const targetUrl = `${preferredBackend.replace(/\/$/, '')}/api/analyze`;
@@ -180,8 +185,15 @@ export default function App() {
           });
           
           if (!res.ok) throw new Error(`Analysis request failed: ${res.status}`);
-          const data = await res.json();
-          report = data.report || data.analysis || (typeof data === 'string' ? data : JSON.stringify(data, null, 2));
+          
+          const text = await res.text();
+          try {
+            const data = JSON.parse(text);
+            report = data.report || data.analysis || (typeof data === 'string' ? data : JSON.stringify(data, null, 2));
+          } catch {
+            // If it's not JSON, it's likely a human-readable text report
+            report = text;
+          }
         } catch (err) {
           // Fallback to frontend SDK if backend fails or is unavailable
           console.warn('Backend failed, attempting frontend fallback:', err);
@@ -1548,7 +1560,7 @@ export default function App() {
                            <span className="text-[10px] text-blue-400 font-bold uppercase tracking-widest animate-pulse">Agent is processing data nodes...</span>
                         </div>
                       ) : analysisResult ? (
-                        <div className="prose prose-invert prose-xs max-w-none text-blue-100/90 leading-relaxed selection:bg-blue-500/30 markdown-container">
+                        <div className="prose prose-invert prose-xs max-w-none text-blue-100/90 leading-relaxed selection:bg-blue-500/30 font-mono whitespace-pre-wrap">
                           <ReactMarkdown>{analysisResult}</ReactMarkdown>
                         </div>
                       ) : (
