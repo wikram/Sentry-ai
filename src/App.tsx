@@ -245,6 +245,21 @@ export default function App() {
         
         setSources(configData.sources || []);
         setAgents(configData.agents || []);
+
+        // Load agents from listagents API and display them if any are returned
+        try {
+          const listagentsRes = await fetch('/api/listagents');
+          if (listagentsRes.ok) {
+            const listagentsData = await listagentsRes.json();
+            const fetchedAgents = Array.isArray(listagentsData) ? listagentsData : (listagentsData?.agents || []);
+            if (fetchedAgents && fetchedAgents.length > 0) {
+              setAgents(fetchedAgents);
+            }
+          }
+        } catch (err) {
+          console.error('Failed to load agents from /api/listagents:', err);
+        }
+        
         let savedModel = '';
         if (configData.selectedModel) {
           savedModel = configData.selectedModel;

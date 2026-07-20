@@ -197,6 +197,37 @@ async function startServer() {
     }
   });
 
+  app.get('/api/listagents', (req, res) => {
+    try {
+      let jsonObj: any = { configuration: { sources: '', agents: '', selectedModel: '', apiBackendUrl: '' } };
+      if (fs.existsSync(CONFIG_PATH)) {
+        try {
+          const xmlData = fs.readFileSync(CONFIG_PATH, 'utf-8');
+          const parser = new XMLParser();
+          jsonObj = parser.parse(xmlData);
+        } catch (e) {
+          console.error('Error parsing config.xml:', e);
+        }
+      }
+
+      const agents = jsonObj.configuration?.agents?.agent
+        ? (Array.isArray(jsonObj.configuration.agents.agent) ? jsonObj.configuration.agents.agent : [jsonObj.configuration.agents.agent])
+        : [];
+
+      const normalizedAgents = agents.map((a: any) => ({
+        ...a,
+        isActive: a.isActive === 'true' || a.isActive === true,
+        isDefault: a.isDefault === 'true' || a.isDefault === true,
+        findings: Array.isArray(a.findings?.finding) ? a.findings.finding : (a.findings?.finding ? [a.findings.finding] : [])
+      }));
+
+      res.json(normalizedAgents);
+    } catch (error) {
+      console.error('Error in /api/listagents:', error);
+      res.status(500).json({ error: 'Failed to list agents' });
+    }
+  });
+
   app.post('/api/addagent', (req, res) => {
     try {
       const { name, llm_model, conn_url, api_key, is_primary } = req.body;
