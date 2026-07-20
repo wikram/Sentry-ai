@@ -327,12 +327,48 @@ async function startServer() {
     }
   });
 
-  app.post('/api/addagent', (req, res) => {
+  app.post('/api/addagent', async (req, res) => {
     try {
-      const { name, llm_model, conn_url, api_key, is_primary } = req.body;
+      const { name, llm_model, conn_url, api_key, is_primary, is_active } = req.body;
 
       if (!name) {
         return res.status(400).json({ error: 'Agent name is required' });
+      }
+
+      const backendUrl = process.env.VITE_BACKEND_URL;
+      let externalSuccess = false;
+      let externalErrorMsg = '';
+
+      if (backendUrl) {
+        console.log(`Forwarding addagent request to external backend: ${backendUrl}/api/addagent`);
+        try {
+          const externalResponse = await fetch(`${backendUrl}/api/addagent`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              name,
+              llm_model,
+              conn_url,
+              api_key,
+              is_primary,
+              is_active: is_active !== undefined ? is_active : false
+            })
+          });
+
+          if (externalResponse.ok) {
+            console.log('Successfully added agent to external backend.');
+            externalSuccess = true;
+          } else {
+            const errText = await externalResponse.text();
+            console.error(`External backend returned error: ${externalResponse.status} - ${errText}`);
+            externalErrorMsg = `External backend error (status ${externalResponse.status}): ${errText}`;
+          }
+        } catch (fetchErr) {
+          console.error('Failed to connect to external backend during addagent:', fetchErr);
+          externalErrorMsg = `Connection to external backend failed: ${fetchErr instanceof Error ? fetchErr.message : 'Unknown error'}`;
+        }
       }
 
       let jsonObj: any = { configuration: { sources: '', agents: '', selectedModel: '', apiBackendUrl: '' } };
@@ -370,7 +406,7 @@ async function startServer() {
         role: 'Specialized SRE Bot',
         avatar: 'Cpu',
         status: 'idle',
-        isActive: true,
+        isActive: is_active !== undefined ? (is_active === true || is_active === 'true') : false,
         backendUrl: conn_url || '',
         model: llm_model || '',
         apiKey: api_key || '',
@@ -413,6 +449,13 @@ async function startServer() {
       // Save to YAML
       const yamlContent = yaml.dump(configObj);
       fs.writeFileSync(YAML_CONFIG_PATH, yamlContent);
+
+      if (backendUrl && !externalSuccess) {
+        return res.status(502).json({
+          error: `Agent saved locally but failed to register on the external backend: ${externalErrorMsg}`,
+          agent: newAgent
+        });
+      }
 
       res.json({ success: true, message: 'Agent added successfully', agent: newAgent });
     } catch (error) {

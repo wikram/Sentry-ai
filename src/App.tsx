@@ -348,7 +348,8 @@ export default function App() {
       llm_model: agentModel || selectedModel || (supportedModels.length > 0 ? supportedModels[0].id : ''),
       conn_url: agentBackendUrl,
       api_key: agentApiKey,
-      is_primary: agentIsPrimary
+      is_primary: agentIsPrimary,
+      is_active: false
     };
 
     try {
@@ -360,10 +361,12 @@ export default function App() {
         body: JSON.stringify(payload)
       });
       if (!response.ok) {
-        throw new Error(`Server returned status ${response.status}`);
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.error || `Server returned status ${response.status}`);
       }
       const data = await response.json();
-      console.log('Add agent response:', data);
+      console.log('Agent deployment succeeded:', data);
+      alert(`Agent "${agentName}" successfully deployed to the backend system!`);
     } catch (err) {
       console.error('Failed to register agent with API:', err);
       alert('Failed to deploy agent on backend: ' + (err instanceof Error ? err.message : 'Unknown error'));
@@ -373,7 +376,7 @@ export default function App() {
       id: `agent-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       name: agentName,
       status: 'idle',
-      isActive: true,
+      isActive: false,
       isDefault: agentIsPrimary || agents.length === 0, // Make first agent or primary agent default automatically
       backendUrl: agentBackendUrl || apiBackendUrl, // Fallback to global backend if empty
       model: agentModel || selectedModel,
