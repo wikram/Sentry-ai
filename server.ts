@@ -6,6 +6,9 @@ import { XMLParser, XMLBuilder } from 'fast-xml-parser';
 import yaml from 'js-yaml';
 import multer from 'multer';
 import { GoogleGenAI } from '@google/genai';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 async function startServer() {
   const app = express();
@@ -197,8 +200,104 @@ async function startServer() {
     }
   });
 
-  app.get('/api/listagents', (req, res) => {
+  app.get('/api/listagents', async (req, res) => {
     try {
+      const backendUrl = process.env.VITE_BACKEND_URL;
+      
+      if (backendUrl) {
+        console.log(`Fetching agents from configured backend: ${backendUrl}/api/listagents`);
+        try {
+          const response = await fetch(`${backendUrl}/api/listagents`, {
+            headers: { 'Accept': 'application/json' }
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            const fetchedAgents = Array.isArray(data) ? data : (data?.agents || []);
+            
+            // Helper functions for robust field value parsing
+            const parseAgentField = (val: any): string => {
+              if (val === undefined || val === null) return '';
+              const str = String(val).trim();
+              if (str.includes('=')) {
+                const parts = str.split('=');
+                parts.shift(); // remove the key part
+                let value = parts.join('=').trim();
+                if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+                  value = value.substring(1, value.length - 1);
+                }
+                return value;
+              }
+              return str;
+            };
+
+            const mappedAgents = fetchedAgents.map((a: any) => {
+              if (Array.isArray(a)) {
+                const id = parseAgentField(a[0]);
+                const name = parseAgentField(a[1]);
+                const model = parseAgentField(a[2]);
+                const agentBackendUrl = parseAgentField(a[3]);
+                const apiKey = parseAgentField(a[4]);
+                const isPrimaryVal = parseAgentField(a[5]);
+                const isActiveVal = parseAgentField(a[6]);
+
+                const isDefault = isPrimaryVal === 'true' || isPrimaryVal === '1' || a[5] === true;
+                const isActive = isActiveVal === 'true' || isActiveVal === '1' || a[6] === true || a[6] === undefined;
+
+                return {
+                  id: id ? (id.startsWith('agent-') ? id : `agent-${id}`) : `agent-${Date.now()}`,
+                  name: name || 'SREBOT',
+                  role: 'Specialized SRE Bot',
+                  avatar: 'Cpu',
+                  status: 'idle',
+                  isActive,
+                  backendUrl: agentBackendUrl || '',
+                  model: model || '',
+                  apiKey: apiKey || '',
+                  isDefault,
+                  findings: []
+                };
+              } else if (a && typeof a === 'object') {
+                const id = String(a.id || a.agent_id || '');
+                const name = String(a.name || '');
+                const model = String(a.llm_model || a.model || '');
+                const backendUrl = String(a.conn_url || a.backendUrl || '');
+                const apiKey = String(a.api_key || a.apiKey || '');
+                const isDefault = a.is_primary === true || a.is_primary === 'true' || a.isDefault === true || a.isDefault === 'true';
+                const isActive = a.is_active !== false && a.is_active !== 'false' && a.isActive !== false && a.isActive !== 'false';
+                const findings = Array.isArray(a.findings) ? a.findings : (Array.isArray(a.findings?.finding) ? a.findings.finding : []);
+
+                return {
+                  id: id ? (id.startsWith('agent-') ? id : `agent-${id}`) : `agent-${Date.now()}`,
+                  name,
+                  role: a.role || 'Specialized SRE Bot',
+                  avatar: a.avatar || 'Cpu',
+                  status: a.status || 'idle',
+                  isActive,
+                  backendUrl,
+                  model,
+                  apiKey,
+                  isDefault,
+                  findings
+                };
+              }
+              return null;
+            }).filter(Boolean);
+
+            if (mappedAgents.length > 0) {
+              console.log(`Successfully mapped ${mappedAgents.length} agents from backend.`);
+              return res.json(mappedAgents);
+            }
+          } else {
+            console.warn(`Backend listagents returned status: ${response.status}`);
+          }
+        } catch (fetchErr) {
+          console.error(`Failed to fetch listagents from external backend:`, fetchErr);
+        }
+      }
+
+      // Fallback: Read local config.xml if VITE_BACKEND_URL is not set or external fetch fails
+      console.log('Falling back to local config.xml for listagents.');
       let jsonObj: any = { configuration: { sources: '', agents: '', selectedModel: '', apiBackendUrl: '' } };
       if (fs.existsSync(CONFIG_PATH)) {
         try {
