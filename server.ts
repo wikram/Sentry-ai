@@ -103,6 +103,7 @@ async function startServer() {
       const normalizedAgents = agents.map((a: any) => ({
         ...a,
         isActive: a.isActive === 'true' || a.isActive === true,
+        isDefault: a.isDefault === 'true' || a.isDefault === true,
         findings: Array.isArray(a.findings?.finding) ? a.findings.finding : (a.findings?.finding ? [a.findings.finding] : [])
       }));
 
@@ -144,6 +145,9 @@ async function startServer() {
               status: a.status,
               isActive: a.isActive,
               backendUrl: a.backendUrl,
+              isDefault: a.isDefault,
+              model: a.model,
+              apiKey: a.apiKey,
               findings: {
                  finding: a.findings || []
               }
@@ -190,6 +194,100 @@ async function startServer() {
     } catch (error) {
       console.error('Error saving config:', error);
       res.status(500).json({ error: 'Failed to save configuration' });
+    }
+  });
+
+  app.post('/api/addagent', (req, res) => {
+    try {
+      const { name, llm_model, conn_url, api_key, is_primary } = req.body;
+
+      if (!name) {
+        return res.status(400).json({ error: 'Agent name is required' });
+      }
+
+      let jsonObj: any = { configuration: { sources: '', agents: '', selectedModel: '', apiBackendUrl: '' } };
+      if (fs.existsSync(CONFIG_PATH)) {
+        try {
+          const xmlData = fs.readFileSync(CONFIG_PATH, 'utf-8');
+          const parser = new XMLParser();
+          jsonObj = parser.parse(xmlData);
+        } catch (e) {
+          console.error('Error parsing config.xml:', e);
+        }
+      }
+
+      if (!jsonObj.configuration) jsonObj.configuration = {};
+      if (!jsonObj.configuration.sources) jsonObj.configuration.sources = '';
+      if (!jsonObj.configuration.agents) jsonObj.configuration.agents = '';
+
+      const existingAgentsObj = jsonObj.configuration.agents?.agent;
+      let existingAgents: any[] = [];
+      if (existingAgentsObj) {
+        existingAgents = Array.isArray(existingAgentsObj) ? existingAgentsObj : [existingAgentsObj];
+      }
+
+      // If is_primary is true, set all other agents' isDefault to false
+      existingAgents = existingAgents.map((a: any) => ({
+        ...a,
+        isActive: a.isActive === 'true' || a.isActive === true,
+        isDefault: is_primary ? false : (a.isDefault === 'true' || a.isDefault === true)
+      }));
+
+      const newAgentId = `agent-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const newAgent = {
+        id: newAgentId,
+        name: name,
+        role: 'Specialized SRE Bot',
+        avatar: 'Cpu',
+        status: 'idle',
+        isActive: true,
+        backendUrl: conn_url || '',
+        model: llm_model || '',
+        apiKey: api_key || '',
+        isDefault: is_primary ? true : (existingAgents.length === 0),
+        findings: {
+          finding: []
+        }
+      };
+
+      existingAgents.push(newAgent);
+
+      const configObj = {
+        configuration: {
+          sources: jsonObj.configuration.sources || '',
+          agents: {
+            agent: existingAgents.map((a: any) => ({
+              id: a.id,
+              name: a.name,
+              role: a.role || 'Specialized SRE Bot',
+              avatar: a.avatar || 'Cpu',
+              status: a.status || 'idle',
+              isActive: a.isActive,
+              backendUrl: a.backendUrl || '',
+              model: a.model || '',
+              apiKey: a.apiKey || '',
+              isDefault: a.isDefault,
+              findings: a.findings || { finding: [] }
+            }))
+          },
+          selectedModel: jsonObj.configuration.selectedModel || '',
+          apiBackendUrl: jsonObj.configuration.apiBackendUrl || ''
+        }
+      };
+
+      // Save to XML
+      const builder = new XMLBuilder({ format: true });
+      const xmlContent = builder.build(configObj);
+      fs.writeFileSync(CONFIG_PATH, xmlContent);
+
+      // Save to YAML
+      const yamlContent = yaml.dump(configObj);
+      fs.writeFileSync(YAML_CONFIG_PATH, yamlContent);
+
+      res.json({ success: true, message: 'Agent added successfully', agent: newAgent });
+    } catch (error) {
+      console.error('Error adding agent:', error);
+      res.status(500).json({ error: 'Failed to add agent' });
     }
   });
 

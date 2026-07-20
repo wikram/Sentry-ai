@@ -40,6 +40,9 @@ import ReactMarkdown from 'react-markdown';
 import { Incident, RCAAgent } from './types';
 import { MOCK_INCIDENTS } from './mockData';
 
+// Provision to configure backend system URL via environment variable
+const CONFIGURED_BACKEND_URL = (import.meta as any).env?.VITE_BACKEND_URL || "";
+
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState<{ email: string } | null>(null);
@@ -49,7 +52,7 @@ export default function App() {
   const [agents, setAgents] = useState<RCAAgent[]>([]);
   const [supportedModels, setSupportedModels] = useState<any[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>('');
-  const [apiBackendUrl, setApiBackendUrl] = useState<string>('');
+  const [apiBackendUrl, setApiBackendUrl] = useState<string>(CONFIGURED_BACKEND_URL);
   const [logStream, setLogStream] = useState<string>('');
   const [description, setDescription] = useState<string>('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -247,7 +250,11 @@ export default function App() {
           savedModel = configData.selectedModel;
           setSelectedModel(savedModel);
         }
-        if (configData.apiBackendUrl) setApiBackendUrl(configData.apiBackendUrl);
+        if (CONFIGURED_BACKEND_URL) {
+          setApiBackendUrl(CONFIGURED_BACKEND_URL);
+        } else if (configData.apiBackendUrl) {
+          setApiBackendUrl(configData.apiBackendUrl);
+        }
 
         // Then fetch supported models
         const modelsRes = await fetch('https://openrouter.ai/api/v1/models');
@@ -308,7 +315,9 @@ export default function App() {
   const [sourceName, setSourceName] = useState('');
   const [agentName, setAgentName] = useState('');
   const [agentModel, setAgentModel] = useState('');
-  const [agentBackendUrl, setAgentBackendUrl] = useState('');
+  const [agentBackendUrl, setAgentBackendUrl] = useState(CONFIGURED_BACKEND_URL);
+  const [agentApiKey, setAgentApiKey] = useState('sk-prj-xxxxxxxxxx');
+  const [agentIsPrimary, setAgentIsPrimary] = useState(false);
   const [configName, setConfigName] = useState('');
   const [configUrl, setConfigUrl] = useState('');
   const [configUser, setConfigUser] = useState('');
@@ -316,21 +325,54 @@ export default function App() {
 
   const [stayInAddAgent, setStayInAddAgent] = useState(false);
 
-  const handleAddAgent = () => {
+  const handleAddAgent = async () => {
     if (!agentName) return;
+    
+    const payload = {
+      name: agentName,
+      llm_model: agentModel || selectedModel || (supportedModels.length > 0 ? supportedModels[0].id : ''),
+      conn_url: agentBackendUrl,
+      api_key: agentApiKey,
+      is_primary: agentIsPrimary
+    };
+
+    try {
+      const response = await fetch('/api/addagent', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        throw new Error(`Server returned status ${response.status}`);
+      }
+      const data = await response.json();
+      console.log('Add agent response:', data);
+    } catch (err) {
+      console.error('Failed to register agent with API:', err);
+      alert('Failed to deploy agent on backend: ' + (err instanceof Error ? err.message : 'Unknown error'));
+    }
     
     const newAgent: RCAAgent = {
       id: `agent-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       name: agentName,
       status: 'idle',
       isActive: true,
-      isDefault: agents.length === 0, // Make first agent default automatically
+      isDefault: agentIsPrimary || agents.length === 0, // Make first agent or primary agent default automatically
       backendUrl: agentBackendUrl || apiBackendUrl, // Fallback to global backend if empty
       model: agentModel || selectedModel,
       findings: []
     };
 
-    setAgents(prev => [...prev, newAgent]);
+    // If this agent is set as primary, un-default all other agents first
+    setAgents(prev => {
+      let updated = prev;
+      if (agentIsPrimary) {
+        updated = prev.map(a => ({ ...a, isDefault: false }));
+      }
+      return [...updated, newAgent];
+    });
     
     if (!stayInAddAgent) {
       setShowAddAgent(false);
@@ -343,7 +385,9 @@ export default function App() {
     // Clear fields
     setAgentName('');
     setAgentModel(selectedModel || (supportedModels.length > 0 ? supportedModels[0].id : ''));
-    setAgentBackendUrl('');
+    setAgentBackendUrl(CONFIGURED_BACKEND_URL);
+    setAgentApiKey('sk-prj-xxxxxxxxxx');
+    setAgentIsPrimary(false);
   };
 
   const deleteAgent = (id: string) => {
@@ -374,13 +418,13 @@ export default function App() {
     setConfiguringAgentId(null);
     setAgentName('');
     setAgentModel(selectedModel);
-    setAgentBackendUrl('');
+    setAgentBackendUrl(CONFIGURED_BACKEND_URL);
   };
 
   const openAgentConfig = (agent: RCAAgent) => {
     setConfiguringAgentId(agent.id);
     setAgentName(agent.name);
-    setAgentBackendUrl(agent.backendUrl || '');
+    setAgentBackendUrl(agent.backendUrl || CONFIGURED_BACKEND_URL);
     setAgentModel(agent.model || selectedModel);
     setShowAgentConfigModal(true);
   };
@@ -591,10 +635,35 @@ export default function App() {
                     <input 
                       type="text" 
                       value={agentBackendUrl}
-                      onChange={(e) => setAgentBackendUrl(e.target.value)}
+                      disabled={true}
                       placeholder="https://agent-api.internal.org"
+                      className="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none cursor-not-allowed font-mono text-slate-500"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">API Key</label>
+                    <input 
+                      type="text" 
+                      value={agentApiKey}
+                      onChange={(e) => setAgentApiKey(e.target.value)}
+                      placeholder="sk-prj-xxxxxxxxxx"
                       className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all font-mono"
                     />
+                  </div>
+                  <div className="flex items-center gap-3 py-2 px-1">
+                    <label className="flex items-center gap-2 cursor-pointer group">
+                      <div className="relative">
+                        <input 
+                          type="checkbox" 
+                          checked={agentIsPrimary}
+                          onChange={(e) => setAgentIsPrimary(e.target.checked)}
+                          className="sr-only"
+                        />
+                        <div className={`w-8 h-4 rounded-full transition-colors ${agentIsPrimary ? 'bg-blue-500' : 'bg-slate-200'}`} />
+                        <div className={`absolute left-0.5 top-0.5 w-3 h-3 bg-white rounded-full transition-transform ${agentIsPrimary ? 'translate-x-4' : ''} shadow-sm`} />
+                      </div>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest group-hover:text-slate-600 transition-colors cursor-pointer">Set as Primary Agent</span>
+                    </label>
                   </div>
                 </div>
 
@@ -706,9 +775,9 @@ export default function App() {
                     <input 
                       type="text" 
                       value={agentBackendUrl}
-                      onChange={(e) => setAgentBackendUrl(e.target.value)}
+                      disabled={true}
                       placeholder="https://..."
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all font-mono"
+                      className="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none cursor-not-allowed font-mono text-slate-500"
                     />
                   </div>
                 </div>
@@ -2097,12 +2166,12 @@ export default function App() {
                     <input 
                       type="text"
                       value={apiBackendUrl}
-                      onChange={(e) => setApiBackendUrl(e.target.value)}
+                      disabled={true}
                       placeholder="https://api.your-backend.com/v1"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+                      className="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none cursor-not-allowed text-slate-500"
                     />
                     <p className="text-[11px] text-slate-400 font-medium">
-                      The base URL for the LLM inference server or proxy (e.g., OpenRouter base or your custom agent gateway).
+                      The base URL is configured in code and is non-editable.
                     </p>
                   </div>
 
@@ -2230,7 +2299,7 @@ function Login({ onLogin }: { onLogin: (user: any) => void }) {
 
         <div className="mt-8 pt-8 border-t border-slate-100 text-center">
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center justify-center gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> SECURE LINK ESTABLISHED
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> SECURE LINK ESTABLISHED
           </p>
         </div>
       </motion.div>
