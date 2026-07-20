@@ -234,6 +234,25 @@ export default function App() {
   const [isScrapingJenkins, setIsScrapingJenkins] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isFetchingAgents, setIsFetchingAgents] = useState(false);
+
+  const fetchAndSetAgents = async () => {
+    setIsFetchingAgents(true);
+    try {
+      const listagentsRes = await fetch('/api/listagents');
+      if (listagentsRes.ok) {
+        const listagentsData = await listagentsRes.json();
+        const fetchedAgents = Array.isArray(listagentsData) ? listagentsData : (listagentsData?.agents || []);
+        if (fetchedAgents && fetchedAgents.length > 0) {
+          setAgents(fetchedAgents);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load agents from /api/listagents:', err);
+    } finally {
+      setIsFetchingAgents(false);
+    }
+  };
 
   // Load config on mount
   useEffect(() => {
@@ -248,16 +267,9 @@ export default function App() {
 
         // Load agents from listagents API and display them if any are returned
         try {
-          const listagentsRes = await fetch('/api/listagents');
-          if (listagentsRes.ok) {
-            const listagentsData = await listagentsRes.json();
-            const fetchedAgents = Array.isArray(listagentsData) ? listagentsData : (listagentsData?.agents || []);
-            if (fetchedAgents && fetchedAgents.length > 0) {
-              setAgents(fetchedAgents);
-            }
-          }
+          await fetchAndSetAgents();
         } catch (err) {
-          console.error('Failed to load agents from /api/listagents:', err);
+          console.error('Failed to load agents on mount:', err);
         }
         
         let savedModel = '';
@@ -1290,7 +1302,10 @@ export default function App() {
             icon={<Cpu size={18} />} 
             label="Agents" 
             active={activeTab === 'agents'} 
-            onClick={() => setActiveTab('agents')} 
+            onClick={() => {
+              setActiveTab('agents');
+              fetchAndSetAgents();
+            }} 
           />
         </nav>
 
@@ -1833,18 +1848,15 @@ export default function App() {
               >
                 <div className="flex items-center justify-between">
                   <div>
-                    <h2 className="text-2xl font-bold tracking-tight">AI Diagnostic Agents</h2>
+                    <div className="flex items-center gap-3">
+                      <h2 className="text-2xl font-bold tracking-tight">AI Diagnostic Agents</h2>
+                      {isFetchingAgents && (
+                        <div className="w-5 h-5 border-2 border-slate-300 border-t-slate-800 rounded-full animate-spin" />
+                      )}
+                    </div>
                     <p className="text-sm text-slate-500">Autonomous agents specializing in root cause analysis.</p>
                   </div>
                   <div className="flex gap-3">
-                    <button 
-                      onClick={handleSaveToXml}
-                      disabled={isSaving}
-                      className="px-4 py-2 border border-slate-200 text-slate-600 rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2 hover:bg-slate-50 transition-all disabled:opacity-50"
-                    >
-                      <Save size={16} className={isSaving ? 'animate-pulse' : ''} />
-                      {isSaving ? 'Saving...' : 'Save Configuration'}
-                    </button>
                     <button 
                       onClick={() => setShowAddAgent(true)}
                       className="px-4 py-2 bg-slate-900 text-white rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2 shadow-lg shadow-slate-900/10"
@@ -1855,7 +1867,12 @@ export default function App() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                  {agents.length === 0 ? (
+                  {isFetchingAgents && agents.length === 0 ? (
+                    <div className="col-span-full py-20 flex flex-col items-center justify-center gap-4">
+                      <div className="w-10 h-10 border-4 border-slate-200 border-t-slate-800 rounded-full animate-spin"></div>
+                      <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Loading Autonomous Agents...</p>
+                    </div>
+                  ) : agents.length === 0 ? (
                     <div className="col-span-full py-20 bg-white border border-slate-200 border-dashed rounded-3xl flex flex-col items-center justify-center gap-6">
                       <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center text-slate-300">
                         <Cpu size={40} />
