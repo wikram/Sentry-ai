@@ -21,6 +21,7 @@ export interface RCAAgent {
   isDefault?: boolean;
   backendUrl?: string;
   model?: string;
+  apiKey?: string;
   findings: string[];
 }
 

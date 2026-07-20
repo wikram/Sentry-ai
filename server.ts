@@ -10,6 +10,23 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+async function fetchWithTimeout(resource: string | URL, options: RequestInit & { timeout?: number } = {}) {
+  const { timeout = 2000, ...rest } = options;
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(resource, {
+      ...rest,
+      signal: controller.signal
+    });
+    clearTimeout(id);
+    return response;
+  } catch (error) {
+    clearTimeout(id);
+    throw error;
+  }
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -81,6 +98,17 @@ async function startServer() {
   });
 
   // API Routes
+  app.post('/api/login', (req, res) => {
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ status: 'error', message: 'Username and password are required' });
+    }
+    res.json({
+      status: 'success',
+      message: `User '${username}' logged in successfully`
+    });
+  });
+
   app.get('/api/config', (req, res) => {
     try {
       const xmlData = fs.readFileSync(CONFIG_PATH, 'utf-8');
@@ -179,17 +207,18 @@ async function startServer() {
             
           console.log(`Forwarding model config to ${externalEndpoint}...`);
           
-          const externalResponse = await fetch(externalEndpoint, {
+          const externalResponse = await fetchWithTimeout(externalEndpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: selectedModel })
+            body: JSON.stringify({ model: selectedModel }),
+            timeout: 10000
           });
           
           if (!externalResponse.ok) {
-            console.error(`External API error: ${externalResponse.status} ${externalResponse.statusText}`);
+            console.warn(`External API error: ${externalResponse.status} ${externalResponse.statusText}`);
           }
         } catch (extErr) {
-          console.error('Failed to call external API backend:', extErr);
+          console.warn('Failed to call external API backend:', extErr);
         }
       }
 
@@ -207,8 +236,9 @@ async function startServer() {
       if (backendUrl) {
         console.log(`Fetching agents from configured backend: ${backendUrl}/api/listagents`);
         try {
-          const response = await fetch(`${backendUrl}/api/listagents`, {
-            headers: { 'Accept': 'application/json' }
+          const response = await fetchWithTimeout(`${backendUrl}/api/listagents`, {
+            headers: { 'Accept': 'application/json' },
+            timeout: 15000
           });
           
           if (response.ok) {
@@ -245,7 +275,7 @@ async function startServer() {
                 const isActive = isActiveVal === 'true' || isActiveVal === '1' || a[6] === true || a[6] === undefined;
 
                 return {
-                  id: id ? (id.startsWith('agent-') ? id : `agent-${id}`) : `agent-${Date.now()}`,
+                  id: id ? id.replace(/^agent-/, '').trim() : String(Date.now()),
                   name: name || 'SREBOT',
                   role: 'Specialized SRE Bot',
                   avatar: 'Cpu',
@@ -268,7 +298,7 @@ async function startServer() {
                 const findings = Array.isArray(a.findings) ? a.findings : (Array.isArray(a.findings?.finding) ? a.findings.finding : []);
 
                 return {
-                  id: id ? (id.startsWith('agent-') ? id : `agent-${id}`) : `agent-${Date.now()}`,
+                  id: id ? id.replace(/^agent-/, '').trim() : String(Date.now()),
                   name,
                   role: a.role || 'Specialized SRE Bot',
                   avatar: a.avatar || 'Cpu',
@@ -292,7 +322,7 @@ async function startServer() {
             console.warn(`Backend listagents returned status: ${response.status}`);
           }
         } catch (fetchErr) {
-          console.error(`Failed to fetch listagents from external backend:`, fetchErr);
+          console.warn(`Failed to fetch listagents from external backend:`, fetchErr);
         }
       }
 
@@ -315,6 +345,7 @@ async function startServer() {
 
       const normalizedAgents = agents.map((a: any) => ({
         ...a,
+        id: String(a.id || '').replace(/^agent-/, '').trim(),
         isActive: a.isActive === 'true' || a.isActive === true,
         isDefault: a.isDefault === 'true' || a.isDefault === true,
         findings: Array.isArray(a.findings?.finding) ? a.findings.finding : (a.findings?.finding ? [a.findings.finding] : [])
@@ -342,7 +373,7 @@ async function startServer() {
       if (backendUrl) {
         console.log(`Forwarding addagent request to external backend: ${backendUrl}/api/addagent`);
         try {
-          const externalResponse = await fetch(`${backendUrl}/api/addagent`, {
+          const externalResponse = await fetchWithTimeout(`${backendUrl}/api/addagent`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json'
@@ -354,7 +385,8 @@ async function startServer() {
               api_key,
               is_primary,
               is_active: is_active !== undefined ? is_active : false
-            })
+            }),
+            timeout: 10000
           });
 
           if (externalResponse.ok) {
@@ -362,11 +394,11 @@ async function startServer() {
             externalSuccess = true;
           } else {
             const errText = await externalResponse.text();
-            console.error(`External backend returned error: ${externalResponse.status} - ${errText}`);
+            console.warn(`External backend returned error: ${externalResponse.status} - ${errText}`);
             externalErrorMsg = `External backend error (status ${externalResponse.status}): ${errText}`;
           }
         } catch (fetchErr) {
-          console.error('Failed to connect to external backend during addagent:', fetchErr);
+          console.warn('Failed to connect to external backend during addagent:', fetchErr);
           externalErrorMsg = `Connection to external backend failed: ${fetchErr instanceof Error ? fetchErr.message : 'Unknown error'}`;
         }
       }
@@ -399,7 +431,15 @@ async function startServer() {
         isDefault: is_primary ? false : (a.isDefault === 'true' || a.isDefault === true)
       }));
 
-      const newAgentId = `agent-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      let maxIdNum = 0;
+      existingAgents.forEach((a: any) => {
+        const idStr = String(a.id || '').replace(/^agent-/, '').trim();
+        const num = parseInt(idStr, 10);
+        if (!isNaN(num) && num > maxIdNum) {
+          maxIdNum = num;
+        }
+      });
+      const newAgentId = String(maxIdNum + 1);
       const newAgent = {
         id: newAgentId,
         name: name,
@@ -464,6 +504,154 @@ async function startServer() {
     }
   });
 
+  app.post('/api/updateagent', async (req, res) => {
+    try {
+      const { agent_id, name, llm_model, conn_url, api_key, is_primary, is_active } = req.body;
+
+      if (!agent_id) {
+        return res.status(400).json({ error: 'Agent ID is required' });
+      }
+
+      const backendUrl = process.env.VITE_BACKEND_URL;
+      let externalSuccess = false;
+      let externalErrorMsg = '';
+
+      if (backendUrl) {
+        console.log(`Forwarding updateagent request to external backend: ${backendUrl}/api/updateagent`);
+        try {
+          const externalResponse = await fetchWithTimeout(`${backendUrl}/api/updateagent`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              agent_id,
+              name,
+              llm_model,
+              conn_url,
+              api_key,
+              is_primary,
+              is_active
+            }),
+            timeout: 10000
+          });
+
+          if (externalResponse.ok) {
+            console.log('Successfully updated agent on external backend.');
+            externalSuccess = true;
+          } else {
+            const errText = await externalResponse.text();
+            console.warn(`External backend returned error for updateagent: ${externalResponse.status} - ${errText}`);
+            externalErrorMsg = `External backend error (status ${externalResponse.status}): ${errText}`;
+          }
+        } catch (fetchErr) {
+          console.warn('Failed to connect to external backend during updateagent:', fetchErr);
+          externalErrorMsg = `Connection to external backend failed: ${fetchErr instanceof Error ? fetchErr.message : 'Unknown error'}`;
+        }
+      }
+
+      let jsonObj: any = { configuration: { sources: '', agents: '', selectedModel: '', apiBackendUrl: '' } };
+      if (fs.existsSync(CONFIG_PATH)) {
+        try {
+          const xmlData = fs.readFileSync(CONFIG_PATH, 'utf-8');
+          const parser = new XMLParser();
+          jsonObj = parser.parse(xmlData);
+        } catch (e) {
+          console.error('Error parsing config.xml:', e);
+        }
+      }
+
+      if (!jsonObj.configuration) jsonObj.configuration = {};
+      if (!jsonObj.configuration.sources) jsonObj.configuration.sources = '';
+      if (!jsonObj.configuration.agents) jsonObj.configuration.agents = '';
+
+      const existingAgentsObj = jsonObj.configuration.agents?.agent;
+      let existingAgents: any[] = [];
+      if (existingAgentsObj) {
+        existingAgents = Array.isArray(existingAgentsObj) ? existingAgentsObj : [existingAgentsObj];
+      }
+
+      const targetIdStr = String(agent_id).replace(/^agent-/, '').trim();
+      let found = false;
+
+      let updatedAgents = existingAgents.map((a: any) => {
+        const idStr = String(a.id || '').replace(/^agent-/, '').trim();
+        if (idStr === targetIdStr) {
+          found = true;
+          return {
+            ...a,
+            name: name !== undefined ? name : a.name,
+            model: llm_model !== undefined ? llm_model : a.model,
+            backendUrl: conn_url !== undefined ? conn_url : a.backendUrl,
+            apiKey: api_key !== undefined ? api_key : a.apiKey,
+            isActive: is_active !== undefined ? (is_active === true || is_active === 'true' || is_active === '1') : (a.isActive === true || a.isActive === 'true'),
+            isDefault: is_primary !== undefined ? (is_primary === true || is_primary === 'true' || is_primary === '1') : (a.isDefault === true || a.isDefault === 'true'),
+          };
+        }
+        return {
+          ...a,
+          isActive: a.isActive === 'true' || a.isActive === true,
+          isDefault: is_primary ? false : (a.isDefault === 'true' || a.isDefault === true)
+        };
+      });
+
+      if (is_primary) {
+        updatedAgents = updatedAgents.map((a: any) => {
+          const idStr = String(a.id || '').replace(/^agent-/, '').trim();
+          if (idStr === targetIdStr) {
+            return { ...a, isDefault: true };
+          }
+          return { ...a, isDefault: false };
+        });
+      }
+
+      const configObj = {
+        configuration: {
+          sources: jsonObj.configuration.sources || '',
+          agents: {
+            agent: updatedAgents.map((a: any) => ({
+              id: a.id,
+              name: a.name,
+              role: a.role || 'Specialized SRE Bot',
+              avatar: a.avatar || 'Cpu',
+              status: a.status || 'idle',
+              isActive: a.isActive === true || a.isActive === 'true',
+              backendUrl: a.backendUrl || '',
+              model: a.model || '',
+              apiKey: a.apiKey || '',
+              isDefault: a.isDefault === true || a.isDefault === 'true',
+              findings: a.findings || { finding: [] }
+            }))
+          },
+          selectedModel: jsonObj.configuration.selectedModel || '',
+          apiBackendUrl: jsonObj.configuration.apiBackendUrl || ''
+        }
+      };
+
+      // Save to XML
+      const builder = new XMLBuilder({ format: true });
+      const xmlContent = builder.build(configObj);
+      fs.writeFileSync(CONFIG_PATH, xmlContent);
+
+      // Save to YAML
+      const yamlContent = yaml.dump(configObj);
+      fs.writeFileSync(YAML_CONFIG_PATH, yamlContent);
+
+      if (backendUrl && !externalSuccess) {
+        return res.status(502).json({
+          error: `Agent updated locally but failed on the external backend: ${externalErrorMsg}`,
+          success: true,
+          agent_id
+        });
+      }
+
+      res.json({ success: true, message: 'Agent updated successfully', agent_id });
+    } catch (error) {
+      console.error('Error updating agent:', error);
+      res.status(500).json({ error: 'Failed to update agent' });
+    }
+  });
+
   app.get('/api/jenkins/failed-jobs', async (req, res) => {
     try {
       const xmlData = fs.readFileSync(CONFIG_PATH, 'utf-8');
@@ -495,7 +683,7 @@ async function startServer() {
             headers['Authorization'] = `Basic ${auth}`;
           }
 
-          const response = await fetch(apiUrl, { headers });
+          const response = await fetchWithTimeout(apiUrl, { headers, timeout: 2500 });
           if (response.ok) {
             const data: any = await response.json();
             const failedJobs = data.jobs?.filter((job: any) => 

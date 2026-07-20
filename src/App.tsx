@@ -352,6 +352,7 @@ export default function App() {
       is_active: false
     };
 
+    let assignedId = '';
     try {
       const response = await fetch('/api/addagent', {
         method: 'POST',
@@ -366,14 +367,27 @@ export default function App() {
       }
       const data = await response.json();
       console.log('Agent deployment succeeded:', data);
+      assignedId = String(data.agent?.id || data.id || '');
       alert(`Agent "${agentName}" successfully deployed to the backend system!`);
     } catch (err) {
       console.error('Failed to register agent with API:', err);
       alert('Failed to deploy agent on backend: ' + (err instanceof Error ? err.message : 'Unknown error'));
     }
     
+    if (!assignedId) {
+      let maxIdNum = 0;
+      agents.forEach(a => {
+        const idStr = String(a.id || '').replace(/^agent-/, '').trim();
+        const num = parseInt(idStr, 10);
+        if (!isNaN(num) && num > maxIdNum) {
+          maxIdNum = num;
+        }
+      });
+      assignedId = String(maxIdNum + 1);
+    }
+    
     const newAgent: RCAAgent = {
-      id: `agent-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: assignedId,
       name: agentName,
       status: 'idle',
       isActive: false,
@@ -412,10 +426,41 @@ export default function App() {
     setAgents(agents.filter(a => a.id !== id));
   };
 
-  const toggleAgent = (id: string) => {
-    setAgents(agents.map(a => 
-      a.id === id ? { ...a, isActive: !a.isActive } : a
-    ));
+  const toggleAgent = async (id: string) => {
+    const targetAgent = agents.find(a => a.id === id);
+    if (!targetAgent) return;
+
+    const nextActiveState = !targetAgent.isActive;
+
+    try {
+      const response = await fetch('/api/updateagent', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          agent_id: targetAgent.id,
+          name: targetAgent.name,
+          llm_model: targetAgent.model || '',
+          conn_url: targetAgent.backendUrl || '',
+          api_key: targetAgent.apiKey || '',
+          is_primary: targetAgent.isDefault || false,
+          is_active: nextActiveState
+        })
+      });
+
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.error || `Server returned status ${response.status}`);
+      }
+
+      setAgents(agents.map(a => 
+        a.id === id ? { ...a, isActive: nextActiveState } : a
+      ));
+    } catch (err) {
+      console.error('Failed to update agent status:', err);
+      alert('Failed to update agent status on backend: ' + (err instanceof Error ? err.message : 'Unknown error'));
+    }
   };
 
   const handleSaveAgentConfig = () => {
@@ -2252,11 +2297,42 @@ export default function App() {
 function Login({ onLogin }: { onLogin: (user: any) => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (email && password) {
-      onLogin({ email });
+    setErrorMsg('');
+    if (!email || !password) return;
+
+    setIsSubmitting(true);
+    try {
+      const response = await fetch('/api/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          username: email,
+          password: password
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Server returned error ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (data && data.status === 'success') {
+        onLogin({ email });
+      } else {
+        setErrorMsg(data?.message || 'Authentication failed. Please verify credentials.');
+      }
+    } catch (err) {
+      console.error('Login request failed:', err);
+      setErrorMsg('Network error. Unable to authorize connection.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -2280,14 +2356,14 @@ function Login({ onLogin }: { onLogin: (user: any) => void }) {
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="space-y-2">
-            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Terminal ID</label>
+            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Terminal ID / Username</label>
             <div className="relative">
               <User size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
               <input 
-                type="email" 
+                type="text" 
                 required
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-12 pr-4 py-3.5 text-sm text-slate-900 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all font-medium"
-                placeholder="operator@rca.central"
+                placeholder="operator@rca.central or username"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
               />
@@ -2307,11 +2383,20 @@ function Login({ onLogin }: { onLogin: (user: any) => void }) {
               />
             </div>
           </div>
+
+          {errorMsg && (
+            <div className="p-3.5 bg-red-50 border border-red-200 rounded-xl text-xs text-red-600 font-semibold flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+              {errorMsg}
+            </div>
+          )}
+
           <button 
             type="submit"
-            className="w-full py-4 bg-slate-900 text-white rounded-2xl text-xs font-bold uppercase tracking-[0.25em] shadow-xl shadow-slate-900/20 hover:bg-slate-800 transition-all active:scale-[0.98] flex items-center justify-center gap-3"
+            disabled={isSubmitting}
+            className="w-full py-4 bg-slate-900 text-white rounded-2xl text-xs font-bold uppercase tracking-[0.25em] shadow-xl shadow-slate-900/20 hover:bg-slate-800 transition-all active:scale-[0.98] flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Authorize Connection <LogIn size={16} />
+            {isSubmitting ? 'Authorizing...' : 'Authorize Connection'} <LogIn size={16} />
           </button>
         </form>
 
