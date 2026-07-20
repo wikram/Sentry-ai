@@ -98,11 +98,50 @@ async function startServer() {
   });
 
   // API Routes
-  app.post('/api/login', (req, res) => {
+  app.post('/api/login', async (req, res) => {
     const { username, password } = req.body;
     if (!username || !password) {
       return res.status(400).json({ status: 'error', message: 'Username and password are required' });
     }
+
+    const backendUrl = process.env.VITE_BACKEND_URL;
+    if (backendUrl) {
+      try {
+        console.log(`Forwarding login to external backend: ${backendUrl}/api/login`);
+        const externalResponse = await fetchWithTimeout(`${backendUrl}/api/login`, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({ username, password }),
+          timeout: 10000
+        });
+
+        const contentType = externalResponse.headers.get('content-type');
+        let data: any;
+        if (contentType && contentType.includes('application/json')) {
+          data = await externalResponse.json();
+        } else {
+          const text = await externalResponse.text();
+          try {
+            data = JSON.parse(text);
+          } catch {
+            data = { message: text };
+          }
+        }
+
+        console.log('Login response from external backend:', data);
+        return res.status(externalResponse.status).json(data);
+      } catch (fetchErr) {
+        console.log('Unable to connect to external backend during login.');
+        return res.status(503).json({ 
+          status: 'error', 
+          message: 'Connection to external backend failed. Please ensure the backend is running.' 
+        });
+      }
+    }
+
     res.json({
       status: 'success',
       message: `User '${username}' logged in successfully`
@@ -215,10 +254,10 @@ async function startServer() {
           });
           
           if (!externalResponse.ok) {
-            console.warn(`External API error: ${externalResponse.status} ${externalResponse.statusText}`);
+            console.log(`External API status: ${externalResponse.status}`);
           }
         } catch (extErr) {
-          console.warn('Failed to call external API backend:', extErr);
+          console.log('External API backend was unreachable.');
         }
       }
 
@@ -319,10 +358,10 @@ async function startServer() {
               return res.json(mappedAgents);
             }
           } else {
-            console.warn(`Backend listagents returned status: ${response.status}`);
+            console.log(`Backend listagents status: ${response.status}`);
           }
         } catch (fetchErr) {
-          console.warn(`Failed to fetch listagents from external backend:`, fetchErr);
+          console.log(`Unable to fetch listagents from external backend (timed out or unreachable).`);
         }
       }
 
@@ -393,13 +432,13 @@ async function startServer() {
             console.log('Successfully added agent to external backend.');
             externalSuccess = true;
           } else {
-            const errText = await externalResponse.text();
-            console.warn(`External backend returned error: ${externalResponse.status} - ${errText}`);
-            externalErrorMsg = `External backend error (status ${externalResponse.status}): ${errText}`;
+            const errText = await externalResponse.text().catch(() => '');
+            console.log(`External backend returned status ${externalResponse.status}`);
+            externalErrorMsg = `External backend response status ${externalResponse.status}`;
           }
         } catch (fetchErr) {
-          console.warn('Failed to connect to external backend during addagent:', fetchErr);
-          externalErrorMsg = `Connection to external backend failed: ${fetchErr instanceof Error ? fetchErr.message : 'Unknown error'}`;
+          console.log('Unable to connect to external backend during addagent.');
+          externalErrorMsg = `Connection to external backend could not be established.`;
         }
       }
 
@@ -540,13 +579,13 @@ async function startServer() {
             console.log('Successfully updated agent on external backend.');
             externalSuccess = true;
           } else {
-            const errText = await externalResponse.text();
-            console.warn(`External backend returned error for updateagent: ${externalResponse.status} - ${errText}`);
-            externalErrorMsg = `External backend error (status ${externalResponse.status}): ${errText}`;
+            const errText = await externalResponse.text().catch(() => '');
+            console.log(`External backend updateagent returned status ${externalResponse.status}`);
+            externalErrorMsg = `External backend updateagent status ${externalResponse.status}`;
           }
         } catch (fetchErr) {
-          console.warn('Failed to connect to external backend during updateagent:', fetchErr);
-          externalErrorMsg = `Connection to external backend failed: ${fetchErr instanceof Error ? fetchErr.message : 'Unknown error'}`;
+          console.log('Unable to connect to external backend during updateagent.');
+          externalErrorMsg = `Connection to external backend could not be established.`;
         }
       }
 

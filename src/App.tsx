@@ -2318,15 +2318,51 @@ function Login({ onLogin }: { onLogin: (user: any) => void }) {
         })
       });
 
-      if (!response.ok) {
-        throw new Error(`Server returned error ${response.status}`);
+      let data: any = null;
+      try {
+        data = await response.json();
+      } catch (jsonErr) {
+        // Response was not JSON
       }
 
-      const data = await response.json();
-      if (data && data.status === 'success') {
+      if (response.ok && data && data.status === 'success') {
         onLogin({ email });
       } else {
-        setErrorMsg(data?.message || 'Authentication failed. Please verify credentials.');
+        // Extract any potential error message from the response data
+        let errorDetail = '';
+        if (data) {
+          if (typeof data === 'string') {
+            errorDetail = data;
+          } else {
+            errorDetail = data.message || data.detail || data.error || data.error_description || '';
+          }
+        }
+
+        // Clean up or humanize common backend error patterns
+        if (errorDetail) {
+          if (
+            errorDetail.toLowerCase().includes('invalid credentials') || 
+            errorDetail.toLowerCase().includes('failed to log in') ||
+            errorDetail.toLowerCase().includes('unauthorized') ||
+            errorDetail.toLowerCase().includes('failed to authorize')
+          ) {
+            errorDetail = 'Invalid username or password. Please verify your credentials.';
+          }
+        } else {
+          // Fallback messages based on HTTP status codes to be highly user-friendly
+          if (response.status === 401 || response.status === 403) {
+            errorDetail = 'Invalid username or password. Please verify your credentials.';
+          } else if (response.status === 404) {
+            errorDetail = 'Login service not found. Please contact your system administrator.';
+          } else if (response.status >= 500) {
+            errorDetail = 'Internal server error. Please try again later.';
+          } else {
+            // Status 200 or other unexpected codes with no body details
+            errorDetail = 'Authentication failed. Please check your username and password.';
+          }
+        }
+
+        setErrorMsg(errorDetail);
       }
     } catch (err) {
       console.error('Login request failed:', err);
