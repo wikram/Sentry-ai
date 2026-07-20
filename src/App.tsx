@@ -1294,7 +1294,7 @@ export default function App() {
           />
           <NavItem 
             icon={<Terminal size={18} />} 
-            label="Models" 
+            label="Models info" 
             active={activeTab === 'models'} 
             onClick={() => setActiveTab('models')} 
           />
@@ -2200,14 +2200,6 @@ export default function App() {
                     <h2 className="text-2xl font-bold tracking-tight">AI Models</h2>
                     <p className="text-sm text-slate-500">Configure global model settings via OpenRouter.</p>
                   </div>
-                  <button 
-                    onClick={handleSaveToXml}
-                    disabled={isSaving}
-                    className="px-6 py-3 bg-black text-white hover:bg-slate-900 rounded-xl text-xs font-bold uppercase tracking-widest flex items-center gap-2 shadow-lg shadow-black/10 transition-all disabled:opacity-50"
-                  >
-                    <Save size={16} className={isSaving ? 'animate-pulse' : ''} />
-                    {isSaving ? 'Saving...' : 'SAVE MODEL'}
-                  </button>
                 </div>
 
 
@@ -2238,20 +2230,6 @@ export default function App() {
                     </div>
                     <p className="text-[11px] text-slate-400 font-medium">
                       Select the specialized LLM that will drive root cause analysis across all autonomous agents.
-                    </p>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 block">API Backend URL</label>
-                    <input 
-                      type="text"
-                      value={apiBackendUrl}
-                      disabled={true}
-                      placeholder="https://api.your-backend.com/v1"
-                      className="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none cursor-not-allowed text-slate-500"
-                    />
-                    <p className="text-[11px] text-slate-400 font-medium">
-                      The base URL is configured in code and is non-editable.
                     </p>
                   </div>
 
