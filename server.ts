@@ -10,6 +10,59 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+// --- LOGGING ENGINE INITIALIZATION ---
+const logFilePath = process.env.APPLICATION_LOG_PATH || 'logs/app.log';
+
+function ensureLogDir() {
+  try {
+    const dir = path.dirname(logFilePath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+  } catch (err) {
+    process.stderr.write(`Failed to create log directory: ${err}\n`);
+  }
+}
+
+function writeToLogFile(level: string, message: string) {
+  try {
+    ensureLogDir();
+    const timestamp = new Date().toISOString();
+    // Strip ANSI color characters to keep log file clean
+    const cleanMessage = message.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+    const formattedMessage = `[${timestamp}] [${level}] ${cleanMessage}\n`;
+    fs.appendFileSync(logFilePath, formattedMessage, 'utf-8');
+  } catch (err) {
+    process.stderr.write(`Failed to write to log file: ${err}\n`);
+  }
+}
+
+// Preserve original console handles
+const originalLog = console.log;
+const originalError = console.error;
+const originalWarn = console.warn;
+
+console.log = (...args: any[]) => {
+  const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' ');
+  originalLog.apply(console, args);
+  writeToLogFile('INFO', message);
+};
+
+console.error = (...args: any[]) => {
+  const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' ');
+  originalError.apply(console, args);
+  writeToLogFile('ERROR', message);
+};
+
+console.warn = (...args: any[]) => {
+  const message = args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg)).join(' ');
+  originalWarn.apply(console, args);
+  writeToLogFile('WARN', message);
+};
+
+// Initial log to confirm system activation
+console.log(`System Logging initialized. Target log file: ${logFilePath}`);
+
 async function fetchWithTimeout(resource: string | URL, options: RequestInit & { timeout?: number } = {}) {
   const { timeout = 2000, ...rest } = options;
   const controller = new AbortController();
@@ -37,6 +90,16 @@ async function startServer() {
 
   app.use(express.json());
 
+  // Request logging middleware
+  app.use((req, res, next) => {
+    const start = Date.now();
+    res.on('finish', () => {
+      const duration = Date.now() - start;
+      console.log(`[HTTP] ${req.method} ${req.originalUrl} - Status: ${res.statusCode} (${duration}ms)`);
+    });
+    next();
+  });
+
   // Ensure config.xml exists
   if (!fs.existsSync(CONFIG_PATH)) {
     const initialConfig = {
@@ -49,6 +112,22 @@ async function startServer() {
     const xmlContent = builder.build(initialConfig);
     fs.writeFileSync(CONFIG_PATH, xmlContent);
   }
+
+  // Fetch application logs from the configured file
+  app.get('/api/logs', (req, res) => {
+    try {
+      if (!fs.existsSync(logFilePath)) {
+        return res.json({ logs: 'No logs have been captured yet.', path: logFilePath });
+      }
+      const logsContent = fs.readFileSync(logFilePath, 'utf-8');
+      // Return the last 300 lines for efficiency
+      const lines = logsContent.split('\n');
+      const lastLines = lines.slice(-300).join('\n');
+      res.json({ logs: lastLines, path: logFilePath });
+    } catch (error: any) {
+      res.status(500).json({ error: 'Failed to retrieve logs: ' + error.message });
+    }
+  });
 
   // Diagnostics Proxy to avoid CORS
   app.get('/api/diagnostics', async (req, res) => {
@@ -688,6 +767,121 @@ async function startServer() {
     } catch (error) {
       console.error('Error updating agent:', error);
       res.status(500).json({ error: 'Failed to update agent' });
+    }
+  });
+
+  app.post('/api/deleteagent', async (req, res) => {
+    try {
+      const { agent_id, name } = req.body;
+
+      if (!agent_id) {
+        return res.status(400).json({ error: 'Agent ID is required' });
+      }
+
+      const backendUrl = process.env.VITE_BACKEND_URL;
+      let externalSuccess = false;
+      let externalErrorMsg = '';
+
+      if (backendUrl) {
+        console.log(`Forwarding deleteagent request to external backend: ${backendUrl}/api/deleteagent`);
+        try {
+          const externalResponse = await fetchWithTimeout(`${backendUrl}/api/deleteagent`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              agent_id,
+              name
+            }),
+            timeout: 10000
+          });
+
+          if (externalResponse.ok) {
+            console.log('Successfully deleted agent on external backend.');
+            externalSuccess = true;
+          } else {
+            const errText = await externalResponse.text().catch(() => '');
+            console.log(`External backend deleteagent returned status ${externalResponse.status}`);
+            externalErrorMsg = `External backend deleteagent status ${externalResponse.status}`;
+          }
+        } catch (fetchErr) {
+          console.log('Unable to connect to external backend during deleteagent.');
+          externalErrorMsg = `Connection to external backend could not be established.`;
+        }
+      }
+
+      let jsonObj: any = { configuration: { sources: '', agents: '', selectedModel: '', apiBackendUrl: '' } };
+      if (fs.existsSync(CONFIG_PATH)) {
+        try {
+          const xmlData = fs.readFileSync(CONFIG_PATH, 'utf-8');
+          const parser = new XMLParser();
+          jsonObj = parser.parse(xmlData);
+        } catch (e) {
+          console.error('Error parsing config.xml:', e);
+        }
+      }
+
+      if (!jsonObj.configuration) jsonObj.configuration = {};
+      if (!jsonObj.configuration.sources) jsonObj.configuration.sources = '';
+      if (!jsonObj.configuration.agents) jsonObj.configuration.agents = '';
+
+      const existingAgentsObj = jsonObj.configuration.agents?.agent;
+      let existingAgents: any[] = [];
+      if (existingAgentsObj) {
+        existingAgents = Array.isArray(existingAgentsObj) ? existingAgentsObj : [existingAgentsObj];
+      }
+
+      const targetIdStr = String(agent_id).replace(/^agent-/, '').trim();
+      const updatedAgents = existingAgents.filter((a: any) => {
+        const idStr = String(a.id || '').replace(/^agent-/, '').trim();
+        return idStr !== targetIdStr;
+      });
+
+      const configObj = {
+        configuration: {
+          sources: jsonObj.configuration.sources || '',
+          agents: {
+            agent: updatedAgents.map((a: any) => ({
+              id: a.id,
+              name: a.name,
+              role: a.role || 'Specialized SRE Bot',
+              avatar: a.avatar || 'Cpu',
+              status: a.status || 'idle',
+              isActive: a.isActive === true || a.isActive === 'true',
+              backendUrl: a.backendUrl || '',
+              model: a.model || '',
+              apiKey: a.apiKey || '',
+              isDefault: a.isDefault === true || a.isDefault === 'true',
+              findings: a.findings || { finding: [] }
+            }))
+          },
+          selectedModel: jsonObj.configuration.selectedModel || '',
+          apiBackendUrl: jsonObj.configuration.apiBackendUrl || ''
+        }
+      };
+
+      // Save to XML
+      const builder = new XMLBuilder({ format: true });
+      const xmlContent = builder.build(configObj);
+      fs.writeFileSync(CONFIG_PATH, xmlContent);
+
+      // Save to YAML
+      const yamlContent = yaml.dump(configObj);
+      fs.writeFileSync(YAML_CONFIG_PATH, yamlContent);
+
+      if (backendUrl && !externalSuccess) {
+        return res.status(502).json({
+          error: `Agent deleted locally but failed on the external backend: ${externalErrorMsg}`,
+          success: true,
+          agent_id
+        });
+      }
+
+      res.json({ success: true, message: 'Agent deleted successfully', agent_id });
+    } catch (error) {
+      console.error('Error deleting agent:', error);
+      res.status(500).json({ error: 'Failed to delete agent' });
     }
   });
 
