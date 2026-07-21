@@ -387,6 +387,7 @@ export default function App() {
   const [agentBackendUrl, setAgentBackendUrl] = useState(CONFIGURED_BACKEND_URL);
   const [agentApiKey, setAgentApiKey] = useState('sk-prj-xxxxxxxxxx');
   const [agentIsPrimary, setAgentIsPrimary] = useState(false);
+  const [agentIsActive, setAgentIsActive] = useState(true);
   const [configName, setConfigName] = useState('');
   const [configUrl, setConfigUrl] = useState('');
   const [configUser, setConfigUser] = useState('');
@@ -548,7 +549,7 @@ export default function App() {
     }
   };
 
-  const handleSaveAgentConfig = () => {
+  const handleSaveAgentConfig = async () => {
     if (!configuringAgentId) return;
 
     // Duplicate check: Verify if the URL is already used by another agent (excluding the one being edited)
@@ -557,16 +558,79 @@ export default function App() {
       return;
     }
 
-    setAgents(agents.map(a => 
-      a.id === configuringAgentId 
-        ? { ...a, name: agentName, backendUrl: agentBackendUrl, model: agentModel } 
-        : a
-    ));
-    setShowAgentConfigModal(false);
-    setConfiguringAgentId(null);
-    setAgentName('');
-    setAgentModel(selectedModel);
-    setAgentBackendUrl(CONFIGURED_BACKEND_URL);
+    try {
+      console.log('[handleSaveAgentConfig] Calling POST /api/updateagent with parameters:', {
+        agent_id: configuringAgentId,
+        name: agentName,
+        llm_model: agentModel,
+        conn_url: agentBackendUrl,
+        api_key: agentApiKey,
+        is_primary: agentIsPrimary,
+        is_active: agentIsActive
+      });
+
+      const response = await fetch('/api/updateagent', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          agent_id: configuringAgentId,
+          name: agentName,
+          llm_model: agentModel,
+          conn_url: agentBackendUrl,
+          api_key: agentApiKey,
+          is_primary: agentIsPrimary,
+          is_active: agentIsActive
+        })
+      });
+
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        console.error('Failed to update agent from backend:', errJson.error || `Status ${response.status}`);
+        alert('Failed to update agent configuration: ' + (errJson.error || `Server status ${response.status}`));
+        return;
+      }
+
+      console.log('Successfully updated agent configuration on backend.');
+
+      // Update local state
+      setAgents(prevAgents => {
+        let updated = prevAgents.map(a => 
+          a.id === configuringAgentId 
+            ? { 
+                ...a, 
+                name: agentName, 
+                backendUrl: agentBackendUrl, 
+                model: agentModel, 
+                apiKey: agentApiKey, 
+                isDefault: agentIsPrimary,
+                isActive: agentIsActive
+              } 
+            : a
+        );
+
+        if (agentIsPrimary) {
+          // ensure only this agent is default
+          updated = updated.map(a => a.id === configuringAgentId ? a : { ...a, isDefault: false });
+        }
+
+        return updated;
+      });
+
+      setShowAgentConfigModal(false);
+      setConfiguringAgentId(null);
+      setAgentName('');
+      setAgentModel(selectedModel);
+      setAgentBackendUrl(CONFIGURED_BACKEND_URL);
+      setAgentApiKey('skprj-xxxxxxxx');
+      setAgentIsPrimary(false);
+      setAgentIsActive(true);
+
+    } catch (err) {
+      console.error('Network error updating agent config:', err);
+      alert('Network error updating agent configuration: ' + (err instanceof Error ? err.message : 'Unknown error'));
+    }
   };
 
   const openAgentConfig = (agent: RCAAgent) => {
@@ -574,6 +638,9 @@ export default function App() {
     setAgentName(agent.name);
     setAgentBackendUrl(agent.backendUrl || CONFIGURED_BACKEND_URL);
     setAgentModel(agent.model || selectedModel);
+    setAgentApiKey(agent.apiKey || 'skprj-xxxxxxxx');
+    setAgentIsPrimary(!!agent.isDefault);
+    setAgentIsActive(agent.isActive !== false);
     setShowAgentConfigModal(true);
   };
 
@@ -927,6 +994,36 @@ export default function App() {
                       placeholder="https://..."
                       className="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none cursor-not-allowed font-mono text-slate-500"
                     />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">API Key</label>
+                    <input 
+                      type="text" 
+                      value={agentApiKey}
+                      onChange={(e) => setAgentApiKey(e.target.value)}
+                      placeholder="skprj-xxxxxxxx"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all font-mono text-slate-700"
+                    />
+                  </div>
+                  <div className="flex items-center gap-6 pt-2">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input 
+                        type="checkbox"
+                        checked={agentIsPrimary}
+                        onChange={(e) => setAgentIsPrimary(e.target.checked)}
+                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500/20 h-4 w-4"
+                      />
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Primary Agent</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input 
+                        type="checkbox"
+                        checked={agentIsActive}
+                        onChange={(e) => setAgentIsActive(e.target.checked)}
+                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500/20 h-4 w-4"
+                      />
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Active</span>
+                    </label>
                   </div>
                 </div>
 
