@@ -2140,28 +2140,37 @@ export default function App() {
                         <div className={`w-16 h-16 rounded-2xl border flex items-center justify-center text-3xl group-hover:scale-110 transition-transform ${agent.isActive ? 'bg-slate-50 border-slate-100' : 'bg-slate-100 border-slate-200'}`}>
                           <Cpu size={32} className={agent.isActive ? 'text-blue-500' : 'text-slate-400'} />
                         </div>
-                        <div className="flex gap-2">
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); openAgentConfig(agent); }}
-                            className="p-2 text-slate-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
-                            title="Configure"
-                          >
-                            <Settings size={18} />
-                          </button>
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); toggleAgent(agent.id); }}
-                            className={`p-2 rounded-lg transition-colors ${agent.isActive ? 'text-green-500 hover:bg-green-50' : 'text-slate-400 hover:bg-slate-100'}`}
-                            title={agent.isActive ? "Deactivate" : "Activate"}
-                          >
-                            {agent.isActive ? <Power size={18} /> : <PowerOff size={18} />}
-                          </button>
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); deleteAgent(agent.id); }}
-                            className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                            title="Delete"
-                          >
-                            <Trash2 size={18} />
-                          </button>
+                        <div className="flex flex-col items-end gap-2">
+                          <div className="flex gap-2">
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); openAgentConfig(agent); }}
+                              className="p-2 text-slate-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
+                              title="Configure"
+                            >
+                              <Settings size={18} />
+                            </button>
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); toggleAgent(agent.id); }}
+                              className={`p-2 rounded-lg transition-colors ${agent.isActive ? 'text-green-500 hover:bg-green-50' : 'text-slate-400 hover:bg-slate-100'}`}
+                              title={agent.isActive ? "Deactivate" : "Activate"}
+                            >
+                              {agent.isActive ? <Power size={18} /> : <PowerOff size={18} />}
+                            </button>
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); deleteAgent(agent.id); }}
+                              className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Delete"
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          </div>
+                          <input 
+                            type="text" 
+                            readOnly 
+                            value={`Agent id : ${agent.id}`} 
+                            className="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-mono text-slate-500 max-w-[140px] text-right focus:outline-none"
+                            id={`agent-id-box-${agent.id}`}
+                          />
                         </div>
                       </div>
 
