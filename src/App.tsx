@@ -338,6 +338,23 @@ export default function App() {
         if (fetchedAgents && fetchedAgents.length > 0) {
           setAgents(fetchedAgents);
         }
+
+        // Listagents executed successfully! Execute the /api/llm-model GET call.
+        try {
+          const llmModelRes = await fetch('/api/llm-model');
+          if (llmModelRes.ok) {
+            const llmModelData = await llmModelRes.json();
+            if (llmModelData) {
+              if (llmModelData.message === "No Primary AI Agent is configured" || llmModelData.model === "No Primary AI Agent is configured" || !llmModelData.model) {
+                setPrimaryAgentStatusText("NO PRIMARY AGENT SET");
+              } else {
+                setPrimaryAgentStatusText(llmModelData.model);
+              }
+            }
+          }
+        } catch (llmErr) {
+          console.error('Failed to fetch /api/llm-model after listing agents:', llmErr);
+        }
       }
     } catch (err) {
       console.error('Failed to load agents from /api/listagents:', err);
@@ -438,6 +455,7 @@ export default function App() {
   const [agentApiKey, setAgentApiKey] = useState('sk-prj-xxxxxxxxxx');
   const [agentIsPrimary, setAgentIsPrimary] = useState(false);
   const [agentIsActive, setAgentIsActive] = useState(true);
+  const [primaryAgentStatusText, setPrimaryAgentStatusText] = useState<string>('');
   const [configName, setConfigName] = useState('');
   const [configUrl, setConfigUrl] = useState('');
   const [configUser, setConfigUser] = useState('');
@@ -642,7 +660,23 @@ export default function App() {
         return;
       }
 
-      console.log('Successfully updated agent configuration on backend.');
+      console.log('Successfully updated agent configuration on backend. Fetching /api/llm-model...');
+
+      try {
+        const llmModelRes = await fetch('/api/llm-model');
+        if (llmModelRes.ok) {
+          const llmModelData = await llmModelRes.json();
+          if (llmModelData) {
+            if (llmModelData.message === "No Primary AI Agent is configured" || llmModelData.model === "No Primary AI Agent is configured" || !llmModelData.model) {
+              setPrimaryAgentStatusText("NO PRIMARY AGENT SET");
+            } else {
+              setPrimaryAgentStatusText(llmModelData.model);
+            }
+          }
+        }
+      } catch (llmErr) {
+        console.error('Failed to fetch /api/llm-model after updating agent:', llmErr);
+      }
 
       // Update local state
       setAgents(prevAgents => {
@@ -1555,7 +1589,7 @@ export default function App() {
               <div className="flex gap-2 items-center px-3 py-1 bg-purple-50 rounded-md border border-purple-100">
                 <Cpu size={12} className="text-purple-500" />
                 <span className="text-[10px] font-bold text-purple-700 uppercase tracking-widest">
-                  Model: {agents.find(a => a.isDefault)?.model || selectedModel || 'Detecting...'}
+                  {primaryAgentStatusText === "NO PRIMARY AGENT SET" ? "NO PRIMARY AGENT SET" : `Model: ${primaryAgentStatusText || agents.find(a => a.isDefault)?.model || selectedModel || 'Detecting...'}`}
                 </span>
               </div>
             </div>
