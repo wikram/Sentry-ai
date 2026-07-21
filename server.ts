@@ -268,6 +268,22 @@ async function startServer() {
     }
   });
 
+  app.get('/api/llm-model', (req, res) => {
+    try {
+      let selectedModel = '';
+      if (fs.existsSync(CONFIG_PATH)) {
+        const xmlData = fs.readFileSync(CONFIG_PATH, 'utf-8');
+        const parser = new XMLParser();
+        const jsonObj = parser.parse(xmlData);
+        selectedModel = jsonObj.configuration?.selectedModel || '';
+      }
+      res.json({ success: true, model: selectedModel });
+    } catch (error) {
+      console.error('Error in /api/llm-model:', error);
+      res.status(500).json({ error: 'Failed to retrieve LLM model' });
+    }
+  });
+
   app.post('/api/config', async (req, res) => {
     try {
       const { sources, agents, selectedModel, apiBackendUrl } = req.body;
@@ -315,30 +331,6 @@ async function startServer() {
       // Save to YAML
       const yamlContent = yaml.dump(configObj);
       fs.writeFileSync(YAML_CONFIG_PATH, yamlContent);
-
-      // Trigger external API call if Backend URL is provided
-      if (apiBackendUrl && selectedModel) {
-        try {
-          const externalEndpoint = apiBackendUrl.endsWith('/') 
-            ? `${apiBackendUrl}api/v1/config/llm` 
-            : `${apiBackendUrl}/api/v1/config/llm`;
-            
-          console.log(`Forwarding model config to ${externalEndpoint}...`);
-          
-          const externalResponse = await fetchWithTimeout(externalEndpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: selectedModel }),
-            timeout: 10000
-          });
-          
-          if (!externalResponse.ok) {
-            console.log(`External API status: ${externalResponse.status}`);
-          }
-        } catch (extErr) {
-          console.log('External API backend was unreachable.');
-        }
-      }
 
       res.json({ success: true });
     } catch (error) {

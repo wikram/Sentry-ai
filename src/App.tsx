@@ -73,11 +73,61 @@ export default function App() {
     success: boolean;
   } | null>(null);
 
-  const handleSetDefaultAgent = (agentId: string) => {
-    setAgents(agents.map(a => ({
-      ...a,
-      isDefault: a.id === agentId
-    })));
+  const handleSetDefaultAgent = async (agentId: string) => {
+    const targetAgent = agents.find(a => String(a.id).trim() === String(agentId).trim());
+    if (!targetAgent) {
+      console.error('[handleSetDefaultAgent] Target agent not found with ID:', agentId);
+      return;
+    }
+
+    const payload = {
+      agent_id: targetAgent.id,
+      name: targetAgent.name,
+      llm_model: targetAgent.model || selectedModel || 'gemini-1.5-flash',
+      conn_url: targetAgent.backendUrl || CONFIGURED_BACKEND_URL,
+      api_key: targetAgent.apiKey || 'skprj-xxxxxxxx',
+      is_primary: true,
+      is_active: targetAgent.isActive !== false
+    };
+
+    console.log('[handleSetDefaultAgent] Calling /api/updateagent with payload:', payload);
+
+    try {
+      const response = await fetch('/api/updateagent', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        console.error('Failed to update agent to primary on backend:', errJson.error || `Status ${response.status}`);
+        alert('Failed to set primary agent on backend: ' + (errJson.error || `Status ${response.status}`));
+        return;
+      }
+
+      console.log('[handleSetDefaultAgent] Successfully updated agent to primary. Executing GET /api/llm-model...');
+      
+      const modelResponse = await fetch('/api/llm-model');
+      if (modelResponse.ok) {
+        const modelData = await modelResponse.json();
+        console.log('[handleSetDefaultAgent] GET /api/llm-model response:', modelData);
+      } else {
+        console.error('[handleSetDefaultAgent] GET /api/llm-model call failed with status:', modelResponse.status);
+      }
+
+      // Update local state if successful
+      setAgents(agents.map(a => ({
+        ...a,
+        isDefault: a.id === agentId
+      })));
+
+    } catch (err) {
+      console.error('[handleSetDefaultAgent] Network error:', err);
+      alert('Network error setting primary agent: ' + (err instanceof Error ? err.message : 'Unknown error'));
+    }
   };
 
   const handleCheckDiagnostics = async (agent: RCAAgent) => {
@@ -647,22 +697,6 @@ export default function App() {
   const handleSaveToXml = async () => {
     setIsSaving(true);
     
-    // Construct the endpoint URL for display
-    const externalEndpoint = apiBackendUrl 
-      ? (apiBackendUrl.endsWith('/') ? `${apiBackendUrl}api/v1/config/llm` : `${apiBackendUrl}/api/v1/config/llm`)
-      : null;
-
-    if (externalEndpoint && selectedModel) {
-      // Execute the external API call
-      fetch(externalEndpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: selectedModel })
-      }).catch(err => {
-        console.error('Failed to notify external endpoint:', err);
-      });
-    }
-
     try {
       const response = await fetch('/api/config', {
         method: 'POST',
