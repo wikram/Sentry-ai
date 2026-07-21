@@ -110,6 +110,9 @@ export default function App() {
 
       console.log('[handleSetDefaultAgent] Successfully updated agent to primary. Executing GET /api/llm-model...');
       
+      // Update the label with the name of the Primary agent
+      setPrimaryAgentStatusText(targetAgent.name);
+
       const modelResponse = await fetch('/api/llm-model');
       if (modelResponse.ok) {
         const modelData = await modelResponse.json();
@@ -348,7 +351,12 @@ export default function App() {
               if (llmModelData.message === "No Primary AI Agent is configured" || llmModelData.model === "No Primary AI Agent is configured" || !llmModelData.model) {
                 setPrimaryAgentStatusText("NO PRIMARY AGENT SET");
               } else {
-                setPrimaryAgentStatusText(llmModelData.model);
+                const primaryAgent = fetchedAgents.find((a: any) => a.isDefault || a.is_primary || a.isPrimary);
+                if (primaryAgent) {
+                  setPrimaryAgentStatusText(primaryAgent.name);
+                } else {
+                  setPrimaryAgentStatusText(llmModelData.model);
+                }
               }
             }
           }
@@ -670,7 +678,12 @@ export default function App() {
             if (llmModelData.message === "No Primary AI Agent is configured" || llmModelData.model === "No Primary AI Agent is configured" || !llmModelData.model) {
               setPrimaryAgentStatusText("NO PRIMARY AGENT SET");
             } else {
-              setPrimaryAgentStatusText(llmModelData.model);
+              if (agentIsPrimary) {
+                setPrimaryAgentStatusText(agentName);
+              } else {
+                const primaryAgent = agents.find(a => a.isDefault && a.id !== configuringAgentId);
+                setPrimaryAgentStatusText(primaryAgent ? primaryAgent.name : llmModelData.model);
+              }
             }
           }
         }
@@ -1589,7 +1602,7 @@ export default function App() {
               <div className="flex gap-2 items-center px-3 py-1 bg-purple-50 rounded-md border border-purple-100">
                 <Cpu size={12} className="text-purple-500" />
                 <span className="text-[10px] font-bold text-purple-700 uppercase tracking-widest">
-                  {primaryAgentStatusText === "NO PRIMARY AGENT SET" ? "NO PRIMARY AGENT SET" : `Model: ${primaryAgentStatusText || agents.find(a => a.isDefault)?.model || selectedModel || 'Detecting...'}`}
+                  {primaryAgentStatusText === "NO PRIMARY AGENT SET" ? "NO PRIMARY AGENT SET" : `Primary Agent: ${primaryAgentStatusText || agents.find(a => a.isDefault)?.name || 'Detecting...'}`}
                 </span>
               </div>
             </div>
