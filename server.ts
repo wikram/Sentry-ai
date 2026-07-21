@@ -326,11 +326,11 @@ async function startServer() {
       // Save to XML
       const builder = new XMLBuilder({ format: true });
       const xmlContent = builder.build(configObj);
-      fs.writeFileSync(CONFIG_PATH, xmlContent);
+      //fs.writeFileSync(CONFIG_PATH, xmlContent);
 
       // Save to YAML
       const yamlContent = yaml.dump(configObj);
-      fs.writeFileSync(YAML_CONFIG_PATH, yamlContent);
+      //fs.writeFileSync(YAML_CONFIG_PATH, yamlContent);
 
       res.json({ success: true });
     } catch (error) {
@@ -594,11 +594,11 @@ async function startServer() {
       // Save to XML
       const builder = new XMLBuilder({ format: true });
       const xmlContent = builder.build(configObj);
-      fs.writeFileSync(CONFIG_PATH, xmlContent);
+      //fs.writeFileSync(CONFIG_PATH, xmlContent);
 
       // Save to YAML
       const yamlContent = yaml.dump(configObj);
-      fs.writeFileSync(YAML_CONFIG_PATH, yamlContent);
+      //fs.writeFileSync(YAML_CONFIG_PATH, yamlContent);
 
       if (backendUrl && !externalSuccess) {
         return res.status(502).json({
@@ -741,11 +741,11 @@ async function startServer() {
       // Save to XML
       const builder = new XMLBuilder({ format: true });
       const xmlContent = builder.build(configObj);
-      fs.writeFileSync(CONFIG_PATH, xmlContent);
+      //fs.writeFileSync(CONFIG_PATH, xmlContent);
 
       // Save to YAML
       const yamlContent = yaml.dump(configObj);
-      fs.writeFileSync(YAML_CONFIG_PATH, yamlContent);
+      //fs.writeFileSync(YAML_CONFIG_PATH, yamlContent);
 
       if (backendUrl && !externalSuccess) {
         return res.status(502).json({
@@ -856,11 +856,11 @@ async function startServer() {
       // Save to XML
       const builder = new XMLBuilder({ format: true });
       const xmlContent = builder.build(configObj);
-      fs.writeFileSync(CONFIG_PATH, xmlContent);
+      //fs.writeFileSync(CONFIG_PATH, xmlContent);
 
       // Save to YAML
       const yamlContent = yaml.dump(configObj);
-      fs.writeFileSync(YAML_CONFIG_PATH, yamlContent);
+      //fs.writeFileSync(YAML_CONFIG_PATH, yamlContent);
 
       if (backendUrl && !externalSuccess) {
         return res.status(502).json({
