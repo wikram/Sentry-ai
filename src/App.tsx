@@ -476,31 +476,39 @@ export default function App() {
     setAgentIsPrimary(false);
   };
 
-  const deleteAgent = async (id: string) => {
-    const targetAgent = agents.find(a => a.id === id);
-    if (!targetAgent) return;
+  const deleteAgent = async (id: string | number) => {
+    const idStr = String(id).trim();
+    console.log('[deleteAgent] Request to delete agent with ID:', idStr);
+    
+    const targetAgent = agents.find(a => String(a.id).trim() === idStr);
+    const agentName = targetAgent ? targetAgent.name : `Agent ${idStr}`;
+    
+    console.log('[deleteAgent] Found target agent:', targetAgent, 'using name:', agentName);
 
     try {
+      console.log('[deleteAgent] Calling POST /api/deleteagent with:', { agent_id: idStr, name: agentName });
       const response = await fetch('/api/deleteagent', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          agent_id: targetAgent.id,
-          name: targetAgent.name
+          agent_id: idStr,
+          name: agentName
         })
       });
 
       if (!response.ok) {
         const errJson = await response.json().catch(() => ({}));
         console.error('Failed to delete agent from backend:', errJson.error || `Status ${response.status}`);
+      } else {
+        console.log('Successfully deleted agent on backend for ID:', idStr);
       }
     } catch (err) {
       console.error('Network error deleting agent:', err);
     }
 
-    setAgents(agents.filter(a => a.id !== id));
+    setAgents(agents.filter(a => String(a.id).trim() !== idStr));
   };
 
   const toggleAgent = async (id: string) => {
