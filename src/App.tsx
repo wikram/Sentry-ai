@@ -125,13 +125,7 @@ export default function App() {
       if (modelResponse.ok) {
         const modelData = await modelResponse.json();
         console.log('[handleSetDefaultAgent] GET /api/llm-model response:', modelData);
-        if (modelData) {
-          if (modelData.message === "No Primary AI Agent is configured" || modelData.model === "No Primary AI Agent is configured" || !modelData.model) {
-            setPrimaryAgentStatusText("NO PRIMARY MODEL SET");
-          } else {
-            setPrimaryAgentStatusText(modelData.model);
-          }
-        }
+        processLlmModelResponse(modelData);
       } else {
         console.error('[handleSetDefaultAgent] GET /api/llm-model call failed with status:', modelResponse.status);
       }
@@ -362,13 +356,7 @@ export default function App() {
           const llmModelRes = await fetch('/api/llm-model');
           if (llmModelRes.ok) {
             const llmModelData = await llmModelRes.json();
-            if (llmModelData) {
-              if (llmModelData.message === "No Primary AI Agent is configured" || llmModelData.model === "No Primary AI Agent is configured" || !llmModelData.model) {
-                setPrimaryAgentStatusText("NO PRIMARY MODEL SET");
-              } else {
-                setPrimaryAgentStatusText(llmModelData.model);
-              }
-            }
+            processLlmModelResponse(llmModelData);
           }
         } catch (llmErr) {
           console.error('Failed to fetch /api/llm-model after listing agents:', llmErr);
@@ -486,6 +474,24 @@ export default function App() {
   const [configUser, setConfigUser] = useState('');
   const [configKey, setConfigKey] = useState('');
 
+  const processLlmModelResponse = (data: any) => {
+    if (!data) return;
+    let modelVal = '';
+    if (typeof data === 'string') {
+      modelVal = data.trim();
+    } else if (typeof data === 'object') {
+      modelVal = String(data.model || data.llm_model || data.selectedModel || data.primary_model || data.primary_agent || data.name || data.agent || '').trim();
+    }
+
+    const noPrimaryMsg = "No Primary AI Agent is configured";
+    if (data?.message === noPrimaryMsg || modelVal === noPrimaryMsg || !modelVal) {
+      setPrimaryAgentStatusText("NO PRIMARY MODEL SET");
+    } else {
+      setPrimaryAgentStatusText(modelVal);
+      setSelectedModel(modelVal);
+    }
+  };
+
   const [stayInAddAgent, setStayInAddAgent] = useState(false);
 
   const handleAddAgent = async () => {
@@ -554,6 +560,18 @@ export default function App() {
       return [...updated, newAgent];
     });
     
+    if (agentIsPrimary) {
+      try {
+        const llmModelRes = await fetch('/api/llm-model');
+        if (llmModelRes.ok) {
+          const llmModelData = await llmModelRes.json();
+          processLlmModelResponse(llmModelData);
+        }
+      } catch (llmErr) {
+        console.error('Failed to fetch /api/llm-model after adding primary agent:', llmErr);
+      }
+    }
+
     if (!stayInAddAgent) {
       setShowAddAgent(false);
     } else {
@@ -691,13 +709,7 @@ export default function App() {
         const llmModelRes = await fetch('/api/llm-model');
         if (llmModelRes.ok) {
           const llmModelData = await llmModelRes.json();
-          if (llmModelData) {
-            if (llmModelData.message === "No Primary AI Agent is configured" || llmModelData.model === "No Primary AI Agent is configured" || !llmModelData.model) {
-              setPrimaryAgentStatusText("NO PRIMARY MODEL SET");
-            } else {
-              setPrimaryAgentStatusText(llmModelData.model);
-            }
-          }
+          processLlmModelResponse(llmModelData);
         }
       } catch (llmErr) {
         console.error('Failed to fetch /api/llm-model after updating agent:', llmErr);
@@ -958,6 +970,16 @@ export default function App() {
                       className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all font-mono"
                     />
                   </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Temperature</label>
+                    <input 
+                      type="text" 
+                      value="0.2"
+                      disabled={true}
+                      readOnly={true}
+                      className="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none cursor-not-allowed font-mono text-slate-500"
+                    />
+                  </div>
                   <div className="flex items-center gap-3 py-2 px-1">
                     <label className="flex items-center gap-2 cursor-pointer group">
                       <div className="relative">
@@ -1096,6 +1118,16 @@ export default function App() {
                       onChange={(e) => setAgentApiKey(e.target.value)}
                       placeholder="skprj-xxxxxxxx"
                       className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all font-mono text-slate-700"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Temperature</label>
+                    <input 
+                      type="text" 
+                      value="0.2"
+                      disabled={true}
+                      readOnly={true}
+                      className="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none cursor-not-allowed font-mono text-slate-500"
                     />
                   </div>
                   <div className="flex items-center gap-6 pt-2">
@@ -1614,7 +1646,7 @@ export default function App() {
               <div className="flex gap-2 items-center px-3 py-1 bg-purple-50 rounded-md border border-purple-100">
                 <Cpu size={12} className="text-purple-500" />
                 <span className="text-[10px] font-bold text-purple-700 uppercase tracking-widest">
-                  {primaryAgentStatusText === "NO PRIMARY MODEL SET" || primaryAgentStatusText === "NO PRIMARY AGENT SET" ? "NO PRIMARY MODEL SET" : `Model: ${primaryAgentStatusText || agents.find(a => a.isDefault)?.model || 'Detecting...'}`}
+                  {primaryAgentStatusText === "NO PRIMARY MODEL SET" || primaryAgentStatusText === "NO PRIMARY AGENT SET" ? "NO PRIMARY MODEL SET" : `Primary Agent: ${primaryAgentStatusText || agents.find(a => a.isDefault)?.model || 'Detecting...'}`}
                 </span>
               </div>
             </div>

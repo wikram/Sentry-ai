@@ -268,15 +268,65 @@ async function startServer() {
     }
   });
 
-  app.get('/api/llm-model', (req, res) => {
+  app.get('/api/llm-model', async (req, res) => {
     try {
-      let selectedModel = '';
-      if (fs.existsSync(CONFIG_PATH)) {
-        const xmlData = fs.readFileSync(CONFIG_PATH, 'utf-8');
-        const parser = new XMLParser();
-        const jsonObj = parser.parse(xmlData);
-        selectedModel = jsonObj.configuration?.selectedModel || '';
+      const backendUrl = process.env.VITE_BACKEND_URL;
+      if (backendUrl) {
+        console.log(`Forwarding GET /api/llm-model to external backend: ${backendUrl}/api/llm-model`);
+        try {
+          const response = await fetchWithTimeout(`${backendUrl}/api/llm-model`, {
+            headers: { 'Accept': 'application/json' },
+            timeout: 10000
+          });
+          if (response.ok) {
+            const contentType = response.headers.get('content-type') || '';
+            if (contentType.includes('application/json')) {
+              const data = await response.json();
+              console.log('Received JSON from external /api/llm-model:', data);
+              return res.json(data);
+            } else {
+              const textData = await response.text();
+              console.log('Received text from external /api/llm-model:', textData);
+              return res.json({ success: true, model: textData.trim() });
+            }
+          } else {
+            console.log(`External /api/llm-model status: ${response.status}`);
+          }
+        } catch (fetchErr) {
+          console.log(`Unable to fetch /api/llm-model from external backend (timed out or unreachable).`);
+        }
       }
+
+      // Fallback: Read local config.xml or find primary agent model
+      let selectedModel = '';
+      let hasPrimaryAgent = false;
+      if (fs.existsSync(CONFIG_PATH)) {
+        try {
+          const xmlData = fs.readFileSync(CONFIG_PATH, 'utf-8');
+          const parser = new XMLParser();
+          const jsonObj = parser.parse(xmlData);
+          selectedModel = jsonObj.configuration?.selectedModel || '';
+
+          const agents = jsonObj.configuration?.agents?.agent
+            ? (Array.isArray(jsonObj.configuration.agents.agent) ? jsonObj.configuration.agents.agent : [jsonObj.configuration.agents.agent])
+            : [];
+          
+          const primaryAgent = agents.find((a: any) => a.isDefault === 'true' || a.isDefault === true || a.is_primary === 'true' || a.is_primary === true);
+          if (primaryAgent) {
+            hasPrimaryAgent = true;
+            if (!selectedModel) {
+              selectedModel = primaryAgent.model || primaryAgent.llm_model || '';
+            }
+          }
+        } catch (e) {
+          console.error('Error parsing config.xml in /api/llm-model:', e);
+        }
+      }
+
+      if (!selectedModel && !hasPrimaryAgent) {
+        return res.json({ success: true, model: '', message: 'No Primary AI Agent is configured' });
+      }
+
       res.json({ success: true, model: selectedModel });
     } catch (error) {
       console.error('Error in /api/llm-model:', error);
