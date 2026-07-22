@@ -340,6 +340,22 @@ export default function App() {
     };
   }, [activeTab, autoRefreshLogs]);
 
+  const fetchLlmModel = async () => {
+    try {
+      console.log('Executing GET /api/llm-model...');
+      const llmModelRes = await fetch('/api/llm-model');
+      if (llmModelRes.ok) {
+        const llmModelData = await llmModelRes.json();
+        console.log('GET /api/llm-model response:', llmModelData);
+        processLlmModelResponse(llmModelData);
+      } else {
+        console.error('GET /api/llm-model failed with status:', llmModelRes.status);
+      }
+    } catch (llmErr) {
+      console.error('Failed to fetch /api/llm-model:', llmErr);
+    }
+  };
+
   const fetchAndSetAgents = async () => {
     setIsFetchingAgents(true);
     try {
@@ -350,23 +366,15 @@ export default function App() {
         if (fetchedAgents && fetchedAgents.length > 0) {
           setAgents(fetchedAgents);
         }
-
-        // Listagents executed successfully! Execute the /api/llm-model GET call.
-        try {
-          const llmModelRes = await fetch('/api/llm-model');
-          if (llmModelRes.ok) {
-            const llmModelData = await llmModelRes.json();
-            processLlmModelResponse(llmModelData);
-          }
-        } catch (llmErr) {
-          console.error('Failed to fetch /api/llm-model after listing agents:', llmErr);
-        }
       }
     } catch (err) {
       console.error('Failed to load agents from /api/listagents:', err);
     } finally {
       setIsFetchingAgents(false);
     }
+
+    // Execute the /api/llm-model GET call
+    await fetchLlmModel();
   };
 
   // Load config on mount
@@ -431,6 +439,7 @@ export default function App() {
   useEffect(() => {
     if (isAuthenticated) {
       fetchAndSetAgents();
+      fetchLlmModel();
     }
   }, [isAuthenticated]);
 
@@ -878,7 +887,16 @@ export default function App() {
   const currentSource = configuringSourceId ? sources.find(s => s.id === configuringSourceId) : null;
 
   if (!isAuthenticated) {
-    return <Login onLogin={(user) => { setIsAuthenticated(true); setUser(user); }} />;
+    return (
+      <Login 
+        onLogin={(user) => { 
+          setIsAuthenticated(true); 
+          setUser(user); 
+          fetchAndSetAgents();
+          fetchLlmModel();
+        }} 
+      />
+    );
   }
 
   return (
@@ -1646,7 +1664,7 @@ export default function App() {
               <div className="flex gap-2 items-center px-3 py-1 bg-purple-50 rounded-md border border-purple-100">
                 <Cpu size={12} className="text-purple-500" />
                 <span className="text-[10px] font-bold text-purple-700 uppercase tracking-widest">
-                  {primaryAgentStatusText === "NO PRIMARY MODEL SET" || primaryAgentStatusText === "NO PRIMARY AGENT SET" ? "NO PRIMARY MODEL SET" : `Primary Agent: ${primaryAgentStatusText || agents.find(a => a.isDefault)?.model || 'Detecting...'}`}
+                  {primaryAgentStatusText === "NO PRIMARY MODEL SET" || primaryAgentStatusText === "NO PRIMARY AGENT SET" || !primaryAgentStatusText ? "NO PRIMARY MODEL SET" : `Primary Model: ${primaryAgentStatusText}`}
                 </span>
               </div>
             </div>
