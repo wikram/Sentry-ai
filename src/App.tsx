@@ -439,6 +439,13 @@ export default function App() {
     init();
   }, []);
 
+  // Fetch agents and active model info when authenticated after login
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchAndSetAgents();
+    }
+  }, [isAuthenticated]);
+
   // Auto-scrape Jenkins failed jobs every 5 minutes
   useEffect(() => {
     if (loading) return;
