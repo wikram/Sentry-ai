@@ -37,9 +37,20 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
-import ReactMarkdown from 'react-markdown';
 import { Incident, RCAAgent } from './types';
 import { MOCK_INCIDENTS } from './mockData';
+
+import Login from './components/Login';
+import IncidentDetailView from './components/IncidentDetailView';
+import DashboardTab from './components/DashboardTab';
+import LogAnalyzerTab from './components/LogAnalyzerTab';
+import HistoryTab from './components/HistoryTab';
+import AgentsTab from './components/AgentsTab';
+import DataSourcesTab from './components/DataSourcesTab';
+import IntegrationsTab from './components/IntegrationsTab';
+import ModelsTab from './components/ModelsTab';
+import SettingsTab from './components/SettingsTab';
+import { NavItem } from './components/Common';
 
 // Provision to configure backend system URL via environment variable
 const CONFIGURED_BACKEND_URL = (import.meta as any).env?.VITE_BACKEND_URL || "";
@@ -110,13 +121,17 @@ export default function App() {
 
       console.log('[handleSetDefaultAgent] Successfully updated agent to primary. Executing GET /api/llm-model...');
       
-      // Update the label with the model name of the Primary agent
-      setPrimaryAgentStatusText(targetAgent.model || 'gemini-1.5-flash');
-
       const modelResponse = await fetch('/api/llm-model');
       if (modelResponse.ok) {
         const modelData = await modelResponse.json();
         console.log('[handleSetDefaultAgent] GET /api/llm-model response:', modelData);
+        if (modelData) {
+          if (modelData.message === "No Primary AI Agent is configured" || modelData.model === "No Primary AI Agent is configured" || !modelData.model) {
+            setPrimaryAgentStatusText("NO PRIMARY MODEL SET");
+          } else {
+            setPrimaryAgentStatusText(modelData.model);
+          }
+        }
       } else {
         console.error('[handleSetDefaultAgent] GET /api/llm-model call failed with status:', modelResponse.status);
       }
@@ -349,14 +364,9 @@ export default function App() {
             const llmModelData = await llmModelRes.json();
             if (llmModelData) {
               if (llmModelData.message === "No Primary AI Agent is configured" || llmModelData.model === "No Primary AI Agent is configured" || !llmModelData.model) {
-                setPrimaryAgentStatusText("NO PRIMARY AGENT SET");
+                setPrimaryAgentStatusText("NO PRIMARY MODEL SET");
               } else {
-                const primaryAgent = fetchedAgents.find((a: any) => a.isDefault || a.is_primary || a.isPrimary);
-                if (primaryAgent) {
-                  setPrimaryAgentStatusText(primaryAgent.model);
-                } else {
-                  setPrimaryAgentStatusText(llmModelData.model);
-                }
+                setPrimaryAgentStatusText(llmModelData.model);
               }
             }
           }
@@ -676,14 +686,9 @@ export default function App() {
           const llmModelData = await llmModelRes.json();
           if (llmModelData) {
             if (llmModelData.message === "No Primary AI Agent is configured" || llmModelData.model === "No Primary AI Agent is configured" || !llmModelData.model) {
-              setPrimaryAgentStatusText("NO PRIMARY AGENT SET");
+              setPrimaryAgentStatusText("NO PRIMARY MODEL SET");
             } else {
-              if (agentIsPrimary) {
-                setPrimaryAgentStatusText(agentModel);
-              } else {
-                const primaryAgent = agents.find(a => a.isDefault && a.id !== configuringAgentId);
-                setPrimaryAgentStatusText(primaryAgent ? primaryAgent.model : llmModelData.model);
-              }
+              setPrimaryAgentStatusText(llmModelData.model);
             }
           }
         }
@@ -1602,7 +1607,7 @@ export default function App() {
               <div className="flex gap-2 items-center px-3 py-1 bg-purple-50 rounded-md border border-purple-100">
                 <Cpu size={12} className="text-purple-500" />
                 <span className="text-[10px] font-bold text-purple-700 uppercase tracking-widest">
-                  {primaryAgentStatusText === "NO PRIMARY AGENT SET" ? "NO PRIMARY AGENT SET" : `Model: ${primaryAgentStatusText || agents.find(a => a.isDefault)?.model || 'Detecting...'}`}
+                  {primaryAgentStatusText === "NO PRIMARY MODEL SET" || primaryAgentStatusText === "NO PRIMARY AGENT SET" ? "NO PRIMARY MODEL SET" : `Model: ${primaryAgentStatusText || agents.find(a => a.isDefault)?.model || 'Detecting...'}`}
                 </span>
               </div>
             </div>
@@ -1636,1015 +1641,86 @@ export default function App() {
                 onClose={() => setSelectedIncident(null)} 
               />
             ) : activeTab === 'dashboard' ? (
-              <motion.div 
-                key="dashboard"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="max-w-6xl mx-auto space-y-8"
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="text-2xl font-black tracking-tight text-slate-800">Root Cause Command Center</h2>
-                    <p className="text-sm text-slate-500 font-medium tracking-tight">Autonomous synthesis of distributed system health.</p>
-                  </div>
-                  <div className="flex gap-3">
-                    <button 
-                      onClick={() => setShowAddAgent(true)}
-                      className="px-4 py-2 bg-slate-900 text-white rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2 shadow-lg shadow-slate-900/10 hover:bg-slate-800 transition-all"
-                    >
-                      <Plus size={16} /> Deploy New Agent
-                    </button>
-                    <button 
-                      onClick={handleSaveToXml}
-                      disabled={isSaving}
-                      className="px-4 py-2 border border-slate-200 text-slate-600 rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2 hover:bg-slate-50 transition-all disabled:opacity-50"
-                    >
-                      <Save size={16} className={isSaving ? 'animate-pulse' : ''} />
-                      {isSaving ? 'Saving...' : 'Save Configuration'}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Stats Cards */}
-                {agents.length === 0 && (
-                  <motion.div 
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    className="p-10 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-3xl shadow-xl shadow-blue-500/20 text-white relative overflow-hidden"
-                  >
-                    {/* Background decoration */}
-                    <div className="absolute top-0 right-0 -translate-y-1/4 translate-x-1/4 opacity-10">
-                      <Cpu size={300} strokeWidth={1} />
-                    </div>
-                    
-                    <div className="relative z-10 max-w-2xl">
-                      <div className="inline-flex items-center gap-2 px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-[10px] font-bold uppercase tracking-widest mb-6 border border-white/20">
-                        <Activity size={12} /> System Initialization Required
-                      </div>
-                      <h2 className="text-4xl font-black tracking-tight mb-4 leading-tight">
-                        Deploy your first <br />Autonomous Agent
-                      </h2>
-                      <p className="text-blue-100 text-lg font-medium mb-8 leading-relaxed">
-                        To begin automated log processing and root cause analysis, you need to configure at least one diagnostic agent. 
-                        Agents specialize in scanning specific services and reporting findings in real-time.
-                      </p>
-                      <div className="flex gap-4">
-                        <button 
-                          onClick={() => setShowAddAgent(true)}
-                          className="px-8 py-4 bg-white text-blue-600 rounded-2xl font-bold text-sm uppercase tracking-widest hover:bg-blue-50 transition-all shadow-lg flex items-center gap-3"
-                        >
-                          <Plus size={20} /> Create New Agent
-                        </button>
-                        <button 
-                          onClick={() => setActiveTab('agents')}
-                          className="px-8 py-4 bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl font-bold text-sm uppercase tracking-widest hover:bg-white/20 transition-all"
-                        >
-                          View Agent Registry
-                        </button>
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-
-                <div className="grid grid-cols-4 gap-6">
-                  <StatCard 
-                    label="Total Active" 
-                    value={MOCK_INCIDENTS.filter(i => i.status !== 'resolved').length.toString().padStart(2, '0')} 
-                    sub={`Across ${sources.length} Clusters`} 
-                    color="blue" 
-                  />
-                  <StatCard 
-                    label="Critical" 
-                    value={(() => {
-                      const criticalCount = MOCK_INCIDENTS.filter(i => i.severity === 'critical').length;
-                      const hasRecentCritical = MOCK_INCIDENTS.some(i => 
-                        i.severity === 'critical' && 
-                        (Date.now() - new Date(i.createdAt).getTime()) < 3600000
-                      );
-                      return (criticalCount + (hasRecentCritical ? 1 : 0)).toString().padStart(2, '0');
-                    })()} 
-                    sub={(() => {
-                      const recentCount = MOCK_INCIDENTS.filter(i => 
-                        i.severity === 'critical' && 
-                        (Date.now() - new Date(i.createdAt).getTime()) < 3600000
-                      ).length;
-                      return recentCount > 0 ? `+${recentCount} in last 1hr` : 'No recent criticals';
-                    })()}
-                    color="red" 
-                  />
-                  <StatCard label="Avg. Resolution" value="24m" sub="98th percentile" color="green" />
-                  <StatCard label="Agent Coverage" value="94%" sub={`${agents.length} Hybrid Agents`} color="slate" />
-                </div>
-
-                {/* Incident List */}
-                <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                  <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
-                    <h2 className="text-xs font-bold uppercase tracking-widest text-slate-500">Active Analysis Stream</h2>
-                    <div className="flex gap-2">
-                       <span className="flex items-center gap-1 text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded border border-blue-100 font-bold">
-                          <Activity size={10} strokeWidth={3} /> LIVE SYNC
-                       </span>
-                    </div>
-                  </div>
-                  <div className="divide-y divide-slate-100">
-                    {MOCK_INCIDENTS.map((incident) => (
-                      <IncidentRow 
-                        key={incident.id} 
-                        incident={incident} 
-                        onClick={() => setSelectedIncident(incident)} 
-                      />
-                    ))}
-                  </div>
-                </div>
-
-                {/* Agent Feed */}
-                <div className="grid grid-cols-3 gap-8">
-                  <div className="col-span-2 bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
-                    <h2 className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-6 flex items-center gap-2">
-                      <Terminal size={14} className="text-blue-500" />
-                      Live Agent Synthesis
-                    </h2>
-                    <div className="space-y-6">
-                      {agents.filter(a => a.isActive && a.status === 'analyzing').map(agent => (
-                        <div key={agent.id} className="flex gap-5">
-                          <div className="w-12 h-12 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center text-2xl shrink-0 text-blue-500">
-                            <Cpu size={24} />
-                          </div>
-                          <div className="flex-1 space-y-3">
-                            <div className="flex items-center justify-between">
-                              <span className="text-sm font-semibold text-slate-900">{agent.name}</span>
-                              <span className="text-[10px] font-bold text-blue-500 animate-pulse tracking-widest uppercase">Analyzing...</span>
-                            </div>
-                            <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                              <motion.div 
-                                className="h-full bg-blue-500"
-                                animate={{ width: ['20%', '80%', '40%', '90%'] }}
-                                transition={{ duration: 4, repeat: Infinity, ease: 'linear' }}
-                              />
-                            </div>
-                            <div className="text-[11px] text-slate-500 leading-relaxed font-mono bg-slate-50 p-2 rounded border border-slate-100">
-                              {agent.findings[0]}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
-                    <h3 className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-6">Hot Entities</h3>
-                    <div className="space-y-4">
-                      <EntityItem label="checkout-service" type="Service" hits={45} />
-                      <EntityItem label="payment-gateway" type="Endpoint" hits={12} />
-                      <EntityItem label="k8s-node-4" type="Node" hits={8} />
-                      <EntityItem label="redis-main" type="Cache" status="degraded" hits={3} />
-                    </div>
-                  </div>
-                </div>
-              </motion.div>
+              <DashboardTab
+                agents={agents}
+                sources={sources}
+                isSaving={isSaving}
+                setShowAddAgent={setShowAddAgent}
+                handleSaveToXml={handleSaveToXml}
+                setActiveTab={setActiveTab}
+                setSelectedIncident={setSelectedIncident}
+              />
             ) : activeTab === 'log-analyzer' ? (
-              <motion.div 
-                key="log-analyzer"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                className="w-full space-y-6"
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="text-2xl font-bold tracking-tight text-slate-900">Advanced Log Analyzer</h2>
-                    <div className="flex items-center gap-3 mt-1">
-                      <p className="text-sm text-slate-500 font-medium">Cross-reference logs across all active distributed systems.</p>
-                    </div>
-                  </div>
-                  <div className="flex gap-3">
-                    <button 
-                      onClick={() => { setLogStream(''); setAnalysisResult(''); setDescription(''); setSelectedFile(null); setIsFileInputMode(false); }}
-                      className="px-4 py-2 border border-slate-200 text-slate-600 rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2 hover:bg-slate-50 transition-all"
-                    >
-                      <Terminal size={14} /> Clear Stream
-                    </button>
-                    <button 
-                      onClick={handleAnalyzeLogs}
-                      disabled={isAnalyzing || (!logStream && !selectedFile) || !hasActiveAgent}
-                      className="px-4 py-2 bg-slate-900 text-white rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2 shadow-lg shadow-slate-900/10 disabled:opacity-50"
-                      title={agents.length === 0 ? "Please add at least one agent to proceed" : (!hasActiveAgent ? "Please activate your analysis agent to proceed" : "")}
-                    >
-                      {isAnalyzing ? <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Plus size={14} />} 
-                      Analyze Logs
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-8 h-auto">
-                  {/* Input Side - Aligned Right */}
-                  <div className="w-[95%] ml-auto bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col">
-                    <header className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className={`w-2 h-2 rounded-full ${isFileInputMode ? 'bg-purple-500 animate-pulse' : 'bg-blue-500'}`}></span>
-                        <span className="text-[10px] font-mono text-slate-500 uppercase tracking-widest font-bold">
-                          Input: {isFileInputMode ? 'File Buffer (Multipart)' : 'Log Stream Payload'}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <label className={`flex items-center gap-2 px-3 py-1.5 border hover:border-blue-400 rounded-lg text-[10px] font-bold cursor-pointer transition-all shadow-sm ${isFileInputMode ? 'bg-blue-50 border-blue-200 text-blue-600' : 'bg-white border-slate-200 text-slate-600'}`}>
-                          <Upload size={12} className={isFileInputMode ? "text-blue-600" : "text-blue-500"} />
-                          <span>{isFileInputMode && selectedFile ? selectedFile.name.toUpperCase() : 'UPLOAD LOG FILE'}</span>
-                          <input 
-                            type="file" 
-                            className="hidden" 
-                            accept=".txt,.log,text/*"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) {
-                                setSelectedFile(file);
-                                setIsFileInputMode(true);
-                                setLogStream(''); // Clear text input if file selected
-                              }
-                            }}
-                          />
-                        </label>
-                        {isFileInputMode && (
-                          <button 
-                            onClick={() => { setIsFileInputMode(false); setSelectedFile(null); }}
-                            className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
-                            title="Switch to Text Input"
-                          >
-                            <X size={14} />
-                          </button>
-                        )}
-                      </div>
-                    </header>
-                    
-                    <div className="p-8 space-y-6">
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Description / Instructions</label>
-                          <span className={`text-[9px] font-mono ${description.length >= 200 ? 'text-red-500 font-bold' : 'text-slate-400'}`}>
-                            {description.length}/200
-                          </span>
-                        </div>
-                        <input 
-                          type="text"
-                          value={description}
-                          onChange={(e) => setDescription(e.target.value.slice(0, 200))}
-                          placeholder="What should I look for? (e.g. 'Identify latency bottlenecks')"
-                          className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/10 focus:border-blue-400 transition-all font-medium"
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                          {isFileInputMode ? 'File Manifest View' : 'Local Buffer Logs'}
-                        </label>
-                        
-                        {isFileInputMode ? (
-                          <div className="w-full h-64 bg-blue-50/20 border border-blue-100 border-dashed rounded-xl flex flex-col items-center justify-center gap-5 group transition-colors hover:bg-blue-50/40">
-                            <div className="w-20 h-20 bg-white rounded-3xl shadow-xl shadow-blue-500/5 border border-blue-100 flex items-center justify-center text-blue-500 group-hover:scale-110 transition-all duration-500">
-                              <Terminal size={40} />
-                            </div>
-                            <div className="text-center space-y-1">
-                              <p className="text-sm font-bold text-slate-900 tracking-tight">{selectedFile?.name || 'Awaiting selection...'}</p>
-                              <p className="text-[10px] text-slate-400 font-mono uppercase tracking-widest">
-                                {selectedFile 
-                                  ? `${(selectedFile.size / 1024).toFixed(2)} KB • ${selectedFile.type || 'plain/text'}`
-                                  : 'Select a direct log file system resource'
-                                }
-                              </p>
-                            </div>
-                            <div className="flex items-center gap-2 px-3 py-1 bg-white border border-slate-100 rounded-full shadow-sm text-[9px] text-slate-400 font-bold uppercase tracking-tighter">
-                              <ShieldCheck size={10} className="text-green-500" /> Integrity Check Passed
-                            </div>
-                          </div>
-                        ) : (
-                          <textarea 
-                            value={logStream}
-                            onChange={(e) => setLogStream(e.target.value)}
-                            spellCheck={false}
-                            className="w-full h-64 bg-slate-50 border border-slate-100 rounded-xl p-4 font-mono text-[11px] text-slate-800 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/10 focus:border-blue-400 transition-all custom-scrollbar selection:bg-blue-500/10 leading-relaxed"
-                            placeholder="Paste logs here..."
-                          />
-                        )}
-                      </div>
-                    </div>
-
-                    <footer className="px-8 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
-                       <span className="text-[9px] font-mono text-slate-400 uppercase tracking-tighter">
-                         {isFileInputMode 
-                           ? `Binary Stream Size: ${selectedFile?.size.toLocaleString() || 0} Bytes`
-                           : `Payload Size: ${logStream.length.toLocaleString()} Bytes`
-                         }
-                       </span>
-                    </footer>
-                  </div>
-
-                  {/* Output Side - Aligned Left */}
-                  <div className="w-[95%] mr-auto bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden flex flex-col min-h-[300px]">
-                    <header className="px-6 py-4 bg-slate-800/50 border-b border-slate-800 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        {isAnalyzing ? (
-                          <div className="w-2 h-2 rounded-full bg-blue-500 animate-ping" />
-                        ) : (
-                          <Activity size={14} className="text-blue-400" />
-                        )}
-                        <span className="text-[10px] font-mono text-blue-400 uppercase tracking-widest font-bold">Intelligence Analysis Report</span>
-                      </div>
-                    </header>
-
-                    <div className="flex-1 p-8">
-                      {isAnalyzing ? (
-                        <div className="flex flex-col items-center justify-center h-48 gap-4">
-                           <div className="w-8 h-8 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
-                           <span className="text-[10px] text-blue-400 font-bold uppercase tracking-widest animate-pulse">Agent is processing data nodes...</span>
-                        </div>
-                      ) : analysisResult ? (
-                        <div className="prose prose-invert prose-xs max-w-none text-blue-100/90 leading-relaxed selection:bg-blue-500/30 font-mono whitespace-pre-wrap">
-                          <ReactMarkdown>{analysisResult}</ReactMarkdown>
-                        </div>
-                      ) : (
-                        <div className="flex flex-col items-center justify-center p-12 text-slate-600 italic gap-4 opacity-40">
-                          <Cpu size={40} />
-                          <span className="text-[10px] uppercase font-bold tracking-[0.2em]">Awaiting Data for Synthesis</span>
-                        </div>
-                      )}
-                    </div>
-
-                    <footer className="px-8 py-4 bg-black/40 border-t border-slate-800/50 flex items-center justify-between">
-                      <div className="flex items-center gap-1.5 text-[9px] text-slate-500 font-bold uppercase tracking-widest">
-                        <ShieldCheck size={12} className="text-blue-500" /> AICORE-V3 VERIFIED
-                      </div>
-                      <span className="text-[9px] font-mono text-slate-600 uppercase">Analysis Precision: High</span>
-                    </footer>
-                  </div>
-                </div>
-              </motion.div>
+              <LogAnalyzerTab
+                logStream={logStream}
+                setLogStream={setLogStream}
+                description={description}
+                setDescription={setDescription}
+                selectedFile={selectedFile}
+                setSelectedFile={setSelectedFile}
+                isFileInputMode={isFileInputMode}
+                setIsFileInputMode={setIsFileInputMode}
+                isAnalyzing={isAnalyzing}
+                analysisResult={analysisResult}
+                setAnalysisResult={setAnalysisResult}
+                hasActiveAgent={hasActiveAgent}
+                agents={agents}
+                handleAnalyzeLogs={handleAnalyzeLogs}
+              />
             ) : activeTab === 'history' ? (
-              <motion.div 
-                key="history"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="w-[90%] mx-auto space-y-8"
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="text-2xl font-bold tracking-tight text-slate-900">Analysis History</h2>
-                    <p className="text-sm text-slate-500 font-medium">Review past log analysis reports and insights.</p>
-                  </div>
-                  <button 
-                    onClick={() => setAnalysisHistory([])}
-                    className="px-4 py-2 border border-slate-200 text-slate-400 hover:text-red-500 hover:border-red-200 rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2 transition-all"
-                  >
-                    <Trash2 size={14} /> Clear History
-                  </button>
-                </div>
-
-                <div className="space-y-4">
-                  {analysisHistory.length === 0 ? (
-                    <div className="bg-white border border-slate-200 rounded-2xl p-20 text-center flex flex-col items-center gap-4">
-                      <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center text-slate-300">
-                        <History size={32} />
-                      </div>
-                      <div className="space-y-1">
-                        <h3 className="font-bold text-slate-900">No History Yet</h3>
-                        <p className="text-sm text-slate-400">Run an analysis in the Log Analyzer to see results here.</p>
-                      </div>
-                    </div>
-                  ) : (
-                    analysisHistory.map((item) => (
-                      <div 
-                        key={item.id} 
-                        className={`bg-white border transition-all rounded-2xl overflow-hidden shadow-sm hover:shadow-md ${expandedHistoryId === item.id ? 'border-blue-200 ring-4 ring-blue-500/5' : 'border-slate-200'}`}
-                      >
-                        <button 
-                          onClick={() => setExpandedHistoryId(expandedHistoryId === item.id ? null : item.id)}
-                          className="w-full px-8 py-6 flex items-center justify-between text-left group"
-                        >
-                          <div className="flex items-center gap-6">
-                            <div className="w-12 h-12 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-400 group-hover:text-blue-500 transition-colors">
-                              <Terminal size={20} />
-                            </div>
-                            <div>
-                              <div className="flex items-center gap-3 mb-1">
-                                <h3 className="font-bold text-slate-900 tracking-tight">{item.id}</h3>
-                                <span className="px-2 py-0.5 bg-blue-50 text-blue-600 rounded text-[9px] font-black uppercase tracking-widest border border-blue-100">
-                                  COMPLETED
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-3 text-[11px] font-medium text-slate-400 uppercase tracking-widest">
-                                <span className="flex items-center gap-1.5"><Clock size={12} /> {new Date(item.timestamp).toLocaleString()}</span>
-                                <span className="text-slate-200">|</span>
-                                <span>{item.input.length} characters analyzed</span>
-                              </div>
-                            </div>
-                          </div>
-                          <div className={`p-2 rounded-lg transition-all ${expandedHistoryId === item.id ? 'bg-blue-50 text-blue-500 rotate-180' : 'bg-slate-50 text-slate-400 group-hover:text-slate-900 group-hover:bg-slate-100'}`}>
-                            <ChevronRight size={20} />
-                          </div>
-                        </button>
-
-                        <AnimatePresence>
-                          {expandedHistoryId === item.id && (
-                            <motion.div 
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              className="overflow-hidden"
-                            >
-                              <div className="px-8 pb-8 pt-2 grid grid-cols-2 gap-8 border-t border-slate-50">
-                                <div className="space-y-4">
-                                  <div className="flex items-center justify-between">
-                                    <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Input Raw Logs</h4>
-                                    <button 
-                                      onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(item.input); }}
-                                      className="text-[9px] font-bold text-blue-500 uppercase hover:underline"
-                                    >
-                                      Copy Raw
-                                    </button>
-                                  </div>
-                                  <div className="bg-slate-50 border border-slate-100 rounded-xl p-5 font-mono text-[11px] text-slate-600 max-h-[400px] overflow-y-auto whitespace-pre custom-scrollbar">
-                                    {item.input}
-                                  </div>
-                                </div>
-                                <div className="space-y-4">
-                                  <div className="flex items-center justify-between">
-                                    <h4 className="text-[10px] font-bold text-blue-500 uppercase tracking-widest">Intelligence Report</h4>
-                                    <button 
-                                      onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(item.output); }}
-                                      className="text-[9px] font-bold text-blue-500 uppercase hover:underline"
-                                    >
-                                      Copy Report
-                                    </button>
-                                  </div>
-                                  <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 text-[11px] text-blue-100/90 max-h-[400px] overflow-y-auto custom-scrollbar leading-relaxed markdown-container">
-                                    <ReactMarkdown>{item.output}</ReactMarkdown>
-                                  </div>
-                                </div>
-                              </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </motion.div>
+              <HistoryTab
+                analysisHistory={analysisHistory}
+                setAnalysisHistory={setAnalysisHistory}
+                expandedHistoryId={expandedHistoryId}
+                setExpandedHistoryId={setExpandedHistoryId}
+              />
             ) : activeTab === 'agents' ? (
-              <motion.div 
-                key="agents"
-                initial={{ opacity: 0, scale: 0.98 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.98 }}
-                className="max-w-6xl mx-auto space-y-8"
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="flex items-center gap-3">
-                      <h2 className="text-2xl font-bold tracking-tight">AI Diagnostic Agents</h2>
-                      {isFetchingAgents && (
-                        <div className="w-5 h-5 border-2 border-slate-300 border-t-slate-800 rounded-full animate-spin" />
-                      )}
-                    </div>
-                    <p className="text-sm text-slate-500">Autonomous agents specializing in root cause analysis.</p>
-                  </div>
-                  <div className="flex gap-3">
-                    <button 
-                      onClick={() => setShowAddAgent(true)}
-                      className="px-4 py-2 bg-slate-900 text-white rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2 shadow-lg shadow-slate-900/10"
-                    >
-                      <Plus size={16} /> Deploy New Agent
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                  {isFetchingAgents && agents.length === 0 ? (
-                    <div className="col-span-full py-20 flex flex-col items-center justify-center gap-4">
-                      <div className="w-10 h-10 border-4 border-slate-200 border-t-slate-800 rounded-full animate-spin"></div>
-                      <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Loading Autonomous Agents...</p>
-                    </div>
-                  ) : agents.length === 0 ? (
-                    <div className="col-span-full py-20 bg-white border border-slate-200 border-dashed rounded-3xl flex flex-col items-center justify-center gap-6">
-                      <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center text-slate-300">
-                        <Cpu size={40} />
-                      </div>
-                      <div className="text-center space-y-2">
-                        <h3 className="text-xl font-black text-slate-800 tracking-tight">No Agents Deployed</h3>
-                        <p className="text-sm text-slate-500 font-medium max-w-xs mx-auto">
-                          Autonomous entities are required to monitor system health and process diagnostics.
-                        </p>
-                      </div>
-                      <button 
-                        onClick={() => setShowAddAgent(true)}
-                        className="px-8 py-3 bg-slate-900 text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-slate-800 shadow-lg"
-                      >
-                         Configure First Agent
-                      </button>
-                    </div>
-                  ) : agents.map(agent => (
-                    <div key={agent.id} className={`bg-white border rounded-2xl p-8 transition-all group shadow-sm hover:shadow-md relative overflow-hidden ${agent.isActive ? 'border-slate-200 hover:border-blue-500/50' : 'border-slate-100 opacity-60'}`}>
-                      {!agent.isActive && (
-                        <div className="absolute top-0 right-0 p-2">
-                           <span className="text-[8px] font-black uppercase tracking-tighter bg-slate-100 text-slate-400 px-1.5 py-0.5 rounded">DEACTIVATED</span>
-                        </div>
-                      )}
-                      
-                      <div className="flex justify-between items-start mb-6">
-                        <div className={`w-16 h-16 rounded-2xl border flex items-center justify-center text-3xl group-hover:scale-110 transition-transform ${agent.isActive ? 'bg-slate-50 border-slate-100' : 'bg-slate-100 border-slate-200'}`}>
-                          <Cpu size={32} className={agent.isActive ? 'text-blue-500' : 'text-slate-400'} />
-                        </div>
-                        <div className="flex flex-col items-end gap-2">
-                          <div className="flex gap-2">
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); openAgentConfig(agent); }}
-                              className="p-2 text-slate-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
-                              title="Configure"
-                            >
-                              <Settings size={18} />
-                            </button>
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); toggleAgent(agent.id); }}
-                              className={`p-2 rounded-lg transition-colors ${agent.isActive ? 'text-green-500 hover:bg-green-50' : 'text-slate-400 hover:bg-slate-100'}`}
-                              title={agent.isActive ? "Deactivate" : "Activate"}
-                            >
-                              {agent.isActive ? <Power size={18} /> : <PowerOff size={18} />}
-                            </button>
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); deleteAgent(agent.id); }}
-                              className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                              title="Delete"
-                            >
-                              <Trash2 size={18} />
-                            </button>
-                          </div>
-                          <input 
-                            type="text" 
-                            readOnly 
-                            value={`Agent id : ${agent.id}`} 
-                            className="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-mono text-slate-500 max-w-[140px] text-right focus:outline-none"
-                            id={`agent-id-box-${agent.id}`}
-                          />
-                        </div>
-                      </div>
-
-                      <h3 className="font-bold text-xl tracking-tight text-slate-900">{agent.name}</h3>
-                      
-                      {agent.backendUrl && (
-                        <div className="mb-6 flex items-center gap-2 px-2 py-1 bg-slate-50 border border-slate-100 rounded text-[9px] text-slate-400 font-mono overflow-hidden whitespace-nowrap text-ellipsis">
-                          <ExternalLink size={10} />
-                          {agent.backendUrl}
-                        </div>
-                      )}
-                      
-                      <div className="space-y-3">
-                         <div className="text-[10px] uppercase font-bold text-slate-400 tracking-widest">Capabilities</div>
-                         <div className="flex flex-wrap gap-2">
-                           {['Log Profiling', 'Anomaly Detection', 'Trend Analysis'].map(cap => (
-                             <span key={cap} className="text-[10px] px-2 py-0.5 rounded bg-slate-50 border border-slate-100 text-slate-500 font-medium">{cap}</span>
-                           ))}
-                         </div>
-                      </div>
-
-                      <div className="mt-8 pt-6 border-t border-slate-50 flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 flex-1 min-w-0">
-                          <div className={`w-2 h-2 rounded-full ${agent.isActive ? 'bg-green-500' : 'bg-slate-300'}`}></div>
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate">
-                            {agent.isActive ? (diagnosticsMap[agent.id]?.status || agent.status) : 'Inactive'}
-                          </span>
-                        </div>
-                        <div className="flex gap-2 shrink-0">
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); handleSetDefaultAgent(agent.id); }}
-                            className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${agent.isDefault ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
-                          >
-                            {agent.isDefault ? 'Primary' : 'Set Primary'}
-                          </button>
-                          <button 
-                            disabled={!agent.isActive || !agent.backendUrl || diagnosticsMap[agent.id]?.loading}
-                            onClick={(e) => { e.stopPropagation(); handleCheckDiagnostics(agent); }}
-                            className="px-3 py-1.5 border border-slate-200 rounded-lg text-[9px] font-black uppercase tracking-widest text-slate-600 hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-600 disabled:hover:border-slate-200 flex items-center gap-1.5"
-                          >
-                            {diagnosticsMap[agent.id]?.loading && <div className="w-2 h-2 border-2 border-slate-400 border-t-white rounded-full animate-spin" />}
-                            Diagnostics
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </motion.div>
+              <AgentsTab
+                agents={agents}
+                isFetchingAgents={isFetchingAgents}
+                setShowAddAgent={setShowAddAgent}
+                openAgentConfig={openAgentConfig}
+                toggleAgent={toggleAgent}
+                deleteAgent={deleteAgent}
+                handleSetDefaultAgent={handleSetDefaultAgent}
+                handleCheckDiagnostics={handleCheckDiagnostics}
+                diagnosticsMap={diagnosticsMap}
+              />
             ) : activeTab === 'data-sources' ? (
-              <motion.div 
-                key="data-sources"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="max-w-4xl mx-auto space-y-8"
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="flex items-center gap-3">
-                      <h2 className="text-2xl font-bold tracking-tight">Data Sources</h2>
-                      <div className="bg-slate-100 border border-slate-200 text-slate-600 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider">
-                        {sources.length}
-                      </div>
-                    </div>
-                    <p className="text-sm text-slate-500">Manage your DevOps toolchain integrations for analysis.</p>
-                  </div>
-                  <div className="flex gap-3">
-                    {sources.some(s => s.type === 'jenkins' && s.isActive) && (
-                      <button 
-                        onClick={handleScrapeJenkins}
-                        disabled={isScrapingJenkins}
-                        className="px-4 py-2 border border-blue-200 text-blue-600 rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2 hover:bg-blue-50 transition-all disabled:opacity-50"
-                      >
-                        <Search size={16} className={isScrapingJenkins ? 'animate-spin' : ''} />
-                        {isScrapingJenkins ? 'Scraping...' : 'Scrape Failed Jobs'}
-                      </button>
-                    )}
-                    <button 
-                      onClick={handleSaveToXml}
-                      disabled={isSaving}
-                      className="px-4 py-2 border border-slate-200 text-slate-600 rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2 hover:bg-slate-50 transition-all disabled:opacity-50"
-                    >
-                      <Save size={16} className={isSaving ? 'animate-pulse' : ''} />
-                      {isSaving ? 'Saving...' : 'Save Configuration'}
-                    </button>
-                    <button 
-                      onClick={() => setShowAddSource(true)}
-                      className="px-4 py-2 bg-slate-900 text-white rounded-lg text-xs font-bold uppercase tracking-widest flex items-center gap-2"
-                    >
-                      <Plus size={16} /> Add Source
-                    </button>
-                  </div>
-                </div>
-
-                <div className="space-y-6">
-                  {failedJenkinsJobs.length > 0 && (
-                    <motion.div 
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      className="p-6 bg-red-50 border border-red-100 rounded-2xl"
-                    >
-                      <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center gap-3">
-                          <div className="bg-red-500 text-white p-2 rounded-lg">
-                            <AlertTriangle size={18} />
-                          </div>
-                          <div>
-                            <h3 className="font-bold text-red-900">Failed Jenkins Jobs Detected</h3>
-                            <p className="text-[10px] text-red-500 font-bold uppercase tracking-widest">{failedJenkinsJobs.length} Critical failures</p>
-                          </div>
-                        </div>
-                        <button 
-                          onClick={() => setFailedJenkinsJobs([])}
-                          className="text-red-400 hover:text-red-600 transition-colors"
-                        >
-                          <Plus size={20} className="rotate-45" />
-                        </button>
-                      </div>
-                      
-                      <div className="space-y-3">
-                        {failedJenkinsJobs.map((job, idx) => (
-                          <div key={idx} className="bg-white border border-red-50 rounded-xl p-4 flex items-center justify-between shadow-sm">
-                            <div className="flex items-center gap-4">
-                              <div className="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center text-red-500">
-                                <Activity size={18} />
-                              </div>
-                              <div>
-                                <h4 className="font-bold text-slate-900 text-sm">{job.name}</h4>
-                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{job.sourceName}</p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-4">
-                              {job.lastBuild && (
-                                <div className="text-right">
-                                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Failed on</p>
-                                  <p className="text-xs font-mono text-slate-600">{new Date(job.lastBuild.timestamp).toLocaleString()}</p>
-                                </div>
-                              )}
-                              <a 
-                                href={job.url} 
-                                target="_blank" 
-                                rel="noreferrer"
-                                className="p-2 text-slate-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-all"
-                              >
-                                <ExternalLink size={18} />
-                              </a>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </motion.div>
-                  )}
-
-                  <div className="grid grid-cols-1 gap-4">
-                        {sources.map(source => (
-                          <div key={source.id} className={`bg-white border transition-all rounded-xl p-5 flex items-center justify-between shadow-sm ${source.isActive ? 'border-slate-200' : 'border-slate-100 opacity-60'}`}>
-                          <div className="flex items-center gap-4">
-                            <button 
-                              onClick={() => toggleSource(source.id)}
-                              className={`p-2 rounded-lg transition-all ${source.isActive ? 'text-blue-500 bg-blue-50' : 'text-slate-400 bg-slate-50'}`}
-                              title={source.isActive ? 'Deactivate Source' : 'Activate Source'}
-                            >
-                              {source.isActive ? <Power size={18} /> : <PowerOff size={18} />}
-                            </button>
-                            <div className="w-12 h-12 rounded-lg bg-slate-50 flex items-center justify-center border border-slate-100 uppercase font-black text-slate-400 text-[10px]">
-                              {source.type.substring(0, 2)}
-                            </div>
-                            <div>
-                              <h3 className="font-bold text-slate-900">{source.name}</h3>
-                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{source.type}</p>
-                            </div>
-                          </div>
-                          
-                          <div className="flex items-center gap-8">
-                            <div className="text-right">
-                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Status</p>
-                              <span className={`text-xs font-bold ${!source.isActive ? 'text-slate-400' : source.status === 'connected' ? 'text-green-600' : source.status === 'syncing' ? 'text-blue-500' : 'text-red-500'}`}>
-                                {source.isActive ? source.status.toUpperCase() : 'INACTIVE'}
-                              </span>
-                            </div>
-                            <div className="text-right">
-                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Last Sync</p>
-                              <p className="text-xs font-mono text-slate-600">{new Date(source.lastSync!).toLocaleTimeString()}</p>
-                            </div>
-                            <div className="relative">
-                              <button 
-                                onClick={() => setActiveMenuId(activeMenuId === source.id ? null : source.id)}
-                            className={`p-2 transition-colors rounded-lg ${activeMenuId === source.id ? 'bg-slate-100 text-slate-900' : 'text-slate-400 hover:text-slate-900 hover:bg-slate-50'}`}
-                          >
-                            <Settings size={16} />
-                          </button>
-                          
-                          <AnimatePresence>
-                            {activeMenuId === source.id && (
-                              <>
-                                <div 
-                                  className="fixed inset-0 z-10" 
-                                  onClick={() => setActiveMenuId(null)}
-                                />
-                                <motion.div 
-                                  initial={{ opacity: 0, scale: 0.95, y: -10 }}
-                                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                                  exit={{ opacity: 0, scale: 0.95, y: -10 }}
-                                  className="absolute right-0 mt-2 w-48 bg-white border border-slate-200 rounded-xl shadow-xl z-20 overflow-hidden py-1"
-                                >
-                                  <button 
-                                    className="w-full px-4 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2"
-                                    onClick={() => setActiveMenuId(null)}
-                                  >
-                                    <Activity size={14} /> View Logs
-                                  </button>
-                                  <button 
-                                    className="w-full px-4 py-2 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2"
-                                    onClick={() => openConfig(source)}
-                                  >
-                                    <Settings size={14} /> Configure
-                                  </button>
-                                  <div className="h-px bg-slate-100 my-1" />
-                                  <button 
-                                    className="w-full px-4 py-2 text-left text-xs font-bold text-red-600 hover:bg-red-50 flex items-center gap-2"
-                                    onClick={() => deleteSource(source.id)}
-                                  >
-                                    <ShieldAlert size={14} /> Delete Source
-                                  </button>
-                                </motion.div>
-                              </>
-                            )}
-                          </AnimatePresence>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </motion.div>
+              <DataSourcesTab
+                sources={sources}
+                failedJenkinsJobs={failedJenkinsJobs}
+                isScrapingJenkins={isScrapingJenkins}
+                isSaving={isSaving}
+                activeMenuId={activeMenuId}
+                setActiveMenuId={setActiveMenuId}
+                handleScrapeJenkins={handleScrapeJenkins}
+                handleSaveToXml={handleSaveToXml}
+                setShowAddSource={setShowAddSource}
+                setFailedJenkinsJobs={setFailedJenkinsJobs}
+                toggleSource={toggleSource}
+                openConfig={openConfig}
+                deleteSource={deleteSource}
+              />
             ) : activeTab === 'integrations' ? (
-              <motion.div 
-                key="integrations"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="max-w-4xl mx-auto space-y-8"
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="text-2xl font-bold tracking-tight">Integrations</h2>
-                    <p className="text-sm text-slate-500">Configure external communication and notification channels.</p>
-                  </div>
-                </div>
-                <div className="bg-white border border-slate-200 rounded-xl p-12 text-center flex flex-col items-center gap-4 shadow-sm">
-                  <div className="w-16 h-16 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-300">
-                    <Activity size={32} />
-                  </div>
-                  <div className="space-y-1">
-                    <h3 className="font-bold text-slate-900 tracking-tight">No Integrations Configured</h3>
-                    <p className="text-sm text-slate-400 max-w-xs mx-auto">Connect Slack, Jira, or custom webhooks to receive real-time incident analysis reports.</p>
-                  </div>
-                  <button className="mt-4 px-6 py-2.5 bg-slate-900 text-white rounded-xl text-xs font-bold uppercase tracking-widest shadow-lg shadow-slate-900/10">
-                    Browse Marketplace
-                  </button>
-                </div>
-              </motion.div>
+              <IntegrationsTab />
             ) : activeTab === 'models' ? (
-              <motion.div 
-                key="models"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="max-w-4xl mx-auto space-y-8"
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="text-2xl font-bold tracking-tight">AI Models</h2>
-                    <p className="text-sm text-slate-500">Configure global model settings via OpenRouter.</p>
-                  </div>
-                </div>
-
-
-                <div className="bg-white border border-slate-200 rounded-xl p-8 space-y-6 shadow-sm">
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 block">Default Primary Model</label>
-                    <div className="relative">
-                      <select 
-                        value={selectedModel}
-                        onChange={(e) => setSelectedModel(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all appearance-none cursor-pointer"
-                      >
-                        {supportedModels.length === 0 ? (
-                          <option>Loading models...</option>
-                        ) : (
-                          [...supportedModels]
-                            .sort((a, b) => a.name.localeCompare(b.name))
-                            .map(model => (
-                              <option key={model.id} value={model.id}>
-                                {model.name} ({model.id})
-                              </option>
-                            ))
-                        )}
-                      </select>
-                      <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400">
-                        <ChevronRight className="rotate-90" size={16} />
-                      </div>
-                    </div>
-                    <p className="text-[11px] text-slate-400 font-medium">
-                      Select the specialized LLM that will drive root cause analysis across all autonomous agents.
-                    </p>
-                  </div>
-
-                  {selectedModel && supportedModels.length > 0 && (
-                    <div className="pt-4 border-t border-slate-100">
-                      <div className="grid grid-cols-2 gap-6">
-                        <div>
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Context Window</p>
-                          <p className="text-sm font-mono text-slate-700">
-                            {supportedModels.find(m => m.id === selectedModel)?.context_length?.toLocaleString() || 'Unknown'} tokens
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Pricing (per 1M tokens)</p>
-                          <p className="text-sm font-mono text-slate-700">
-                            ${(parseFloat(supportedModels.find(m => m.id === selectedModel)?.pricing?.prompt || '0') * 1000000).toFixed(2)} prompt / 
-                            ${(parseFloat(supportedModels.find(m => m.id === selectedModel)?.pricing?.completion || '0') * 1000000).toFixed(2)} completion
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </motion.div>
+              <ModelsTab
+                selectedModel={selectedModel}
+                setSelectedModel={setSelectedModel}
+                supportedModels={supportedModels}
+              />
             ) : activeTab === 'settings' ? (
-              <motion.div 
-                key="settings"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="max-w-4xl mx-auto space-y-8"
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="text-2xl font-bold tracking-tight">Settings & Monitoring</h2>
-                    <p className="text-sm text-slate-500">General application configuration and live logs.</p>
-                  </div>
-                </div>
-
-                <div className="space-y-6">
-                  {/* Status Card */}
-                  <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 bg-green-500 rounded-full animate-ping" />
-                        <span className="w-2.5 h-2.5 bg-green-500 rounded-full absolute" />
-                        <h3 className="font-bold text-slate-800 text-base ml-2">System Logging Engine</h3>
-                      </div>
-                      <p className="text-sm text-slate-500">
-                        File-based capture is active and writing application logs, HTTP requests, and system anomalies in real time.
-                      </p>
-                      <div className="flex items-center gap-2 mt-2 pt-1">
-                        <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Active Log File:</span>
-                        <code className="text-xs bg-slate-100 text-slate-600 px-2.5 py-1 rounded-md font-mono border border-slate-200">
-                          {logPath || 'logs/app.log'}
-                        </code>
-                      </div>
-                    </div>
-                    
-                    <button
-                      onClick={fetchLogs}
-                      disabled={isLoadingLogs}
-                      className="flex items-center gap-2 px-4 py-2 border border-slate-200 hover:bg-slate-50 rounded-xl text-xs font-bold uppercase tracking-widest text-slate-700 transition-all disabled:opacity-50"
-                    >
-                      <RefreshCw size={14} className={isLoadingLogs ? 'animate-spin' : ''} />
-                      {isLoadingLogs ? 'Refreshing...' : 'Refresh Logs'}
-                    </button>
-                  </div>
-
-                  {/* Logs Console */}
-                  <div className="bg-slate-950 rounded-2xl border border-slate-900 shadow-xl overflow-hidden flex flex-col h-[550px]">
-                    {/* Console Header */}
-                    <div className="bg-slate-900 px-5 py-3.5 border-b border-slate-900/50 flex flex-col sm:flex-row items-center justify-between gap-4">
-                      <div className="flex items-center gap-4">
-                        {/* Dot controls */}
-                        <div className="flex gap-1.5">
-                          <span className="w-3 h-3 bg-red-500/80 rounded-full" />
-                          <span className="w-3 h-3 bg-yellow-500/80 rounded-full" />
-                          <span className="w-3 h-3 bg-green-500/80 rounded-full" />
-                        </div>
-                        <span className="text-xs text-slate-400 font-mono tracking-tight flex items-center gap-2">
-                          <Terminal size={14} className="text-slate-500" />
-                          {logPath ? logPath.split('/').pop() : 'app.log'} — active stream
-                        </span>
-                      </div>
-
-                      <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
-                        {/* Log Filter */}
-                        <div className="relative w-full sm:w-48">
-                          <input
-                            type="text"
-                            placeholder="Filter logs..."
-                            value={logFilter}
-                            onChange={(e) => setLogFilter(e.target.value)}
-                            className="w-full bg-slate-900/60 border border-slate-800 text-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-slate-700 font-mono"
-                          />
-                        </div>
-
-                        {/* Auto refresh switch */}
-                        <label className="flex items-center gap-2 cursor-pointer select-none whitespace-nowrap">
-                          <input
-                            type="checkbox"
-                            checked={autoRefreshLogs}
-                            onChange={(e) => setAutoRefreshLogs(e.target.checked)}
-                            className="sr-only peer"
-                          />
-                          <div className="w-7 h-4 bg-slate-800 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-slate-400 after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-600 peer-checked:after:bg-white relative"></div>
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Auto (5s)</span>
-                        </label>
-                      </div>
-                    </div>
-
-                    {/* Console Output */}
-                    <div className="flex-1 overflow-y-auto p-5 font-mono text-xs leading-relaxed space-y-1 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent">
-                      {(() => {
-                        const allLines = logs.split('\n');
-                        const filteredLines = allLines.filter(line => 
-                          !logFilter || line.toLowerCase().includes(logFilter.toLowerCase())
-                        );
-
-                        if (filteredLines.length === 0 || (filteredLines.length === 1 && !filteredLines[0])) {
-                          return (
-                            <div className="h-full flex flex-col items-center justify-center text-slate-600 space-y-2">
-                              <Terminal size={24} className="text-slate-700 animate-pulse" />
-                              <p className="text-xs">No matching log entries found.</p>
-                            </div>
-                          );
-                        }
-
-                        return filteredLines.map((line, index) => {
-                          if (!line.trim()) return null;
-
-                          let colorClass = 'text-slate-400';
-                          if (line.includes('[ERROR]')) {
-                            colorClass = 'text-red-400 font-medium';
-                          } else if (line.includes('[WARN]')) {
-                            colorClass = 'text-yellow-400/90 font-medium';
-                          } else if (line.includes('[HTTP]')) {
-                            colorClass = 'text-cyan-400';
-                          } else if (line.includes('[INFO]')) {
-                            colorClass = 'text-slate-300';
-                          }
-
-                          return (
-                            <div key={index} className={`hover:bg-slate-900/40 px-2 py-0.5 rounded transition-all flex items-start gap-3 border-l-2 border-transparent hover:border-slate-800`}>
-                              <span className="text-slate-700 select-none text-[10px] w-8 text-right shrink-0">{index + 1}</span>
-                              <span className={colorClass}>{line}</span>
-                            </div>
-                          );
-                        });
-                      })()}
-                    </div>
-                  </div>
-                </div>
-              </motion.div>
+              <SettingsTab
+                logPath={logPath}
+                logs={logs}
+                isLoadingLogs={isLoadingLogs}
+                logFilter={logFilter}
+                setLogFilter={setLogFilter}
+                autoRefreshLogs={autoRefreshLogs}
+                setAutoRefreshLogs={setAutoRefreshLogs}
+                fetchLogs={fetchLogs}
+              />
             ) : (
               <motion.div 
                 key="other"
@@ -2662,174 +1738,6 @@ export default function App() {
   );
 }
 
-function Login({ onLogin }: { onLogin: (user: any) => void }) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [errorMsg, setErrorMsg] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMsg('');
-    if (!email || !password) return;
-
-    setIsSubmitting(true);
-    try {
-      const response = await fetch('/api/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          username: email,
-          password: password
-        })
-      });
-
-      let data: any = null;
-      try {
-        data = await response.json();
-      } catch (jsonErr) {
-        // Response was not JSON
-      }
-
-      if (response.ok && data && data.status === 'success') {
-        onLogin({ email });
-      } else {
-        // Extract any potential error message from the response data
-        let errorDetail = '';
-        if (data) {
-          if (typeof data === 'string') {
-            errorDetail = data;
-          } else {
-            errorDetail = data.message || data.detail || data.error || data.error_description || '';
-          }
-        }
-
-        // Clean up or humanize common backend error patterns
-        if (errorDetail) {
-          if (
-            errorDetail.toLowerCase().includes('invalid credentials') || 
-            errorDetail.toLowerCase().includes('failed to log in') ||
-            errorDetail.toLowerCase().includes('unauthorized') ||
-            errorDetail.toLowerCase().includes('failed to authorize')
-          ) {
-            errorDetail = 'Invalid username or password. Please verify your credentials.';
-          }
-        } else {
-          // Fallback messages based on HTTP status codes to be highly user-friendly
-          if (response.status === 401 || response.status === 403) {
-            errorDetail = 'Invalid username or password. Please verify your credentials.';
-          } else if (response.status === 404) {
-            errorDetail = 'Login service not found. Please contact your system administrator.';
-          } else if (response.status >= 500) {
-            errorDetail = 'Internal server error. Please try again later.';
-          } else {
-            // Status 200 or other unexpected codes with no body details
-            errorDetail = 'Authentication failed. Please check your username and password.';
-          }
-        }
-
-        setErrorMsg(errorDetail);
-      }
-    } catch (err) {
-      console.error('Login request failed:', err);
-      setErrorMsg('Network error. Unable to authorize connection.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  return (
-    <div className="min-h-screen bg-[#020617] flex items-center justify-center p-6 relative overflow-hidden">
-      <div className="absolute top-0 -left-20 w-96 h-96 bg-blue-600/10 rounded-full blur-[120px] animate-pulse" />
-      <div className="absolute bottom-0 -right-20 w-96 h-96 bg-cyan-600/10 rounded-full blur-[120px] animate-pulse delay-700" />
-      
-      <motion.div 
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-md bg-white rounded-3xl p-10 relative z-10 shadow-2xl border border-slate-200"
-      >
-        <div className="flex flex-col items-center mb-10 text-center">
-          <div className="w-16 h-16 bg-slate-900 rounded-2xl flex items-center justify-center mb-6 shadow-xl border border-white/10">
-            <ShieldAlert size={32} className="text-blue-500" />
-          </div>
-          <h1 className="text-3xl font-black tracking-tighter text-slate-900 mb-2">RCACENTRAL</h1>
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Autonomous System Governance</p>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="space-y-2">
-            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Terminal ID / Username</label>
-            <div className="relative">
-              <User size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input 
-                type="text" 
-                required
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-12 pr-4 py-3.5 text-sm text-slate-900 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all font-medium"
-                placeholder="operator@rca.central or username"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-              />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Access Protocol</label>
-            <div className="relative">
-              <Lock size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input 
-                type="password" 
-                required
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-12 pr-4 py-3.5 text-sm text-slate-900 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all font-medium"
-                placeholder="••••••••"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-              />
-            </div>
-          </div>
-
-          {errorMsg && (
-            <div className="p-3.5 bg-red-50 border border-red-200 rounded-xl text-xs text-red-600 font-semibold flex items-center gap-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
-              {errorMsg}
-            </div>
-          )}
-
-          <button 
-            type="submit"
-            disabled={isSubmitting}
-            className="w-full py-4 bg-slate-900 text-white rounded-2xl text-xs font-bold uppercase tracking-[0.25em] shadow-xl shadow-slate-900/20 hover:bg-slate-800 transition-all active:scale-[0.98] flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isSubmitting ? 'Authorizing...' : 'Authorize Connection'} <LogIn size={16} />
-          </button>
-        </form>
-
-        <div className="mt-8 pt-8 border-t border-slate-100 text-center">
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center justify-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> SECURE LINK ESTABLISHED
-          </p>
-        </div>
-      </motion.div>
-    </div>
-  );
-}
-
-function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode, label: string, active?: boolean, onClick: () => void }) {
-  return (
-    <button 
-      onClick={onClick}
-      className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${
-        active 
-          ? 'bg-slate-900 text-white shadow-lg shadow-slate-900/20' 
-          : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
-      }`}
-    >
-      <span className={active ? 'text-white' : 'text-slate-400 group-hover:text-slate-900'}>{icon}</span>
-      <span>{label}</span>
-      {active && <motion.div layoutId="nav-dot" className="ml-auto w-1.5 h-1.5 rounded-full bg-blue-400" />}
-    </button>
-  );
-}
 
 function StatCard({ label, value, sub, color }: { label: string, value: string, sub: string, color: string }) {
   const colors: Record<string, string> = {
@@ -2899,149 +1807,5 @@ function EntityItem({ label, type, hits, status }: { label: string, type: string
   );
 }
 
-function IncidentDetailView({ incident, agents, onClose }: { incident: Incident, agents: RCAAgent[], onClose: () => void }) {
-  return (
-    <motion.div 
-      initial={{ opacity: 0, x: 20 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: 20 }}
-      className="h-full flex flex-col space-y-6"
-    >
-      {/* Detail Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <button onClick={onClose} className="text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-slate-900 flex items-center gap-1 mb-3 transition-colors">
-            <ChevronRight size={12} className="rotate-180" /> Back to Dashboard
-          </button>
-          <div className="flex items-center gap-4">
-            <h2 className="text-3xl font-black tracking-tighter text-slate-900">{incident.title}</h2>
-            <span className={`px-2.5 py-1 text-[10px] font-bold rounded uppercase tracking-widest border ${incident.severity === 'critical' ? 'bg-red-50 text-red-600 border-red-100' : 'bg-blue-50 text-blue-600 border-blue-100'}`}>
-              {incident.severity}
-            </span>
-          </div>
-          <div className="flex items-center gap-6 mt-4 text-[11px] font-bold text-slate-400 uppercase tracking-widest">
-            <span className="flex items-center gap-2"><Clock size={14} className="text-slate-300" /> Created {new Date(incident.createdAt).toLocaleTimeString()}</span>
-            <span className="flex items-center gap-2"><Activity size={14} className="text-blue-400" /> Sources: {incident.sourceTools.join(', ')}</span>
-          </div>
-        </div>
-        <div className="flex gap-3">
-          <button className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold uppercase tracking-widest shadow-lg shadow-slate-900/20 transition-all flex items-center gap-2">
-            <CheckCircle2 size={16} /> Resolve Incident
-          </button>
-          <button className="p-2.5 bg-white border border-slate-200 hover:border-slate-400 rounded-xl text-slate-600 transition-colors shadow-sm">
-             <ExternalLink size={18} />
-          </button>
-        </div>
-      </div>
 
-      <div className="grid grid-cols-12 gap-8 flex-1 overflow-hidden pb-8">
-        {/* Left: Investigation & Logs */}
-        <div className="col-span-8 flex flex-col space-y-8 overflow-hidden">
-          {/* Logs View */}
-          <div className="flex-1 bg-slate-900 rounded-2xl flex flex-col overflow-hidden shadow-2xl border border-slate-800">
-            <div className="h-10 px-4 bg-slate-800 flex items-center justify-between border-b border-slate-700">
-              <div className="flex items-center gap-4">
-                <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest flex items-center gap-2"><Terminal size={14} /> Aggregated Stream</span>
-                <div className="flex gap-1">
-                  <button className="px-2 py-0.5 bg-slate-700 text-[9px] rounded text-white font-bold uppercase">Live Logs</button>
-                  <button className="px-2 py-0.5 text-[9px] rounded text-slate-500 hover:text-slate-300 font-bold uppercase">Filtered View</button>
-                </div>
-              </div>
-              <span className="text-[10px] font-mono text-slate-500 uppercase tracking-widest italic">{incident.logs.length} Operations Syncing</span>
-            </div>
-            <div className="flex-1 overflow-y-auto p-5 font-mono text-[11px] leading-relaxed space-y-1.5 scrollbar-hide">
-              {incident.logs.map((log) => (
-                <div key={log.id} className="flex gap-5 group hover:bg-white/[0.03] -mx-5 px-5 py-1 transition-colors">
-                  <span className="text-slate-600 shrink-0 w-12">{log.timestamp}</span>
-                  <span className={`shrink-0 w-24 text-[10px] font-bold tracking-tight ${log.level === 'error' ? 'text-red-400' : log.level === 'warn' ? 'text-amber-400' : 'text-blue-400'}`}>
-                    {log.source.toUpperCase()}
-                  </span>
-                  <span className="text-slate-300 truncate group-hover:text-white transition-colors">{log.message}</span>
-                </div>
-              ))}
-              <div className="text-blue-500 mt-6 animate-pulse font-bold">_ streaming packet analysis from agents...</div>
-            </div>
-          </div>
-
-          {/* Root Cause Section */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-8 relative overflow-hidden shadow-sm analysis-border">
-            <div className="absolute top-0 right-0 p-6 text-right">
-              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Analysis Confidence</div>
-              <div className="flex items-center gap-3 justify-end">
-                <div className="w-32 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                   <motion.div 
-                    initial={{ width: 0 }}
-                    animate={{ width: `${incident.confidence}%` }}
-                    className="h-full bg-green-500"
-                   />
-                </div>
-                <span className="text-xs font-mono font-bold text-slate-900">{incident.confidence}% <span className="text-green-600 uppercase text-[9px] ml-1">High</span></span>
-              </div>
-            </div>
-            <h3 className="text-[10px] font-bold text-slate-400 flex items-center gap-2 mb-4 uppercase tracking-widest">
-              <AlertTriangle size={16} className="text-blue-500" />
-              Primary Analysis Consensus
-            </h3>
-            <p className="text-2xl text-slate-900 font-bold leading-tight max-w-2xl tracking-tight">
-              "{incident.possibleRCA}"
-            </p>
-            <div className="mt-8 flex gap-5 items-center">
-               <div className="flex -space-x-3">
-                 {agents.filter(a => a.isActive).map(agent => (
-                   <div key={agent.id} className="w-10 h-10 rounded-full border-4 border-white bg-slate-50 flex items-center justify-center text-blue-500 shadow-sm" title={agent.name}>
-                     <Cpu size={16} />
-                   </div>
-                 ))}
-                 {agents.filter(a => a.isActive).length === 0 && (
-                   <div className="text-[10px] text-slate-400 font-bold uppercase py-2">No Active Agents</div>
-                 )}
-               </div>
-               <div className="text-[11px] text-slate-400 font-medium leading-relaxed italic max-w-xs transition-opacity">Consensus reached after logic synthesis from active diagnostic agents.</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Right: Agent Insights & Metadata */}
-        <div className="col-span-4 flex flex-col space-y-8 overflow-hidden">
-          <div className="bg-white border border-slate-200 rounded-2xl p-8 flex-1 flex flex-col overflow-hidden shadow-sm">
-            <h3 className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-8">Agent Findings Stream</h3>
-            <div className="flex-1 overflow-y-auto space-y-8 pr-2 scrollbar-hide">
-               {agents.filter(a => a.isActive).map(agent => (
-                 <div key={agent.id} className="space-y-4">
-                   <div className="flex items-center justify-between">
-                     <span className="text-sm font-bold flex items-center gap-3 text-slate-900">
-                       <span className="w-8 h-8 rounded-lg bg-slate-50 flex items-center justify-center text-blue-500 border border-slate-100"><Cpu size={16} /></span> {agent.name}
-                     </span>
-                     <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-widest ${agent.status === 'complete' ? 'bg-green-50 text-green-600' : 'bg-blue-50 text-blue-600 animate-pulse'}`}>
-                       {agent.status}
-                     </span>
-                   </div>
-                   <ul className="space-y-3 relative ml-4 pl-6 border-l border-slate-100">
-                     {(agent.findings.length > 0 ? agent.findings : ['Running initial heuristic scans...']).map((f, idx) => (
-                       <li key={idx} className="text-xs text-slate-500 leading-relaxed relative font-medium group">
-                         <div className="absolute -left-[28.5px] top-1.5 w-1.5 h-1.5 rounded-full bg-slate-200 group-hover:bg-blue-400 transition-colors" />
-                         {f}
-                       </li>
-                     ))}
-                   </ul>
-                 </div>
-               ))}
-               {agents.filter(a => a.isActive).length === 0 && (
-                 <div className="flex flex-col items-center justify-center h-full text-slate-300 gap-4 opacity-50">
-                    <Cpu size={48} />
-                    <p className="text-xs font-bold uppercase tracking-widest text-center">Deploy agents to enable insights</p>
-                 </div>
-               )}
-            </div>
-            <div className="pt-8 border-t border-slate-100 mt-auto">
-              <button className="w-full py-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl text-xs font-bold uppercase tracking-widest text-slate-600 transition-all">
-                 Task Specialist Agent
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </motion.div>
-  );
-}
 
