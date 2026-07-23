@@ -43,6 +43,7 @@ import { MOCK_INCIDENTS } from './mockData';
 import Login from './components/Login';
 import IncidentDetailView from './components/IncidentDetailView';
 import DashboardTab from './components/DashboardTab';
+import UserDropdownMenu from './components/UserDropdownMenu';
 import LogAnalyzerTab from './components/LogAnalyzerTab';
 import HistoryTab from './components/HistoryTab';
 import AgentsTab from './components/AgentsTab';
@@ -95,6 +96,7 @@ export default function App() {
       agent_id: targetAgent.id,
       name: targetAgent.name,
       llm_model: targetAgent.model || selectedModel || 'gemini-1.5-flash',
+      temperature: targetAgent.temperature || 0.2,
       conn_url: targetAgent.backendUrl || CONFIGURED_BACKEND_URL,
       api_key: targetAgent.apiKey || 'skprj-xxxxxxxx',
       is_primary: true,
@@ -509,6 +511,7 @@ export default function App() {
     const payload = {
       name: agentName,
       llm_model: agentModel || selectedModel || (supportedModels.length > 0 ? supportedModels[0].id : ''),
+      temperature: 0.2,
       conn_url: agentBackendUrl,
       api_key: agentApiKey,
       is_primary: agentIsPrimary,
@@ -648,6 +651,7 @@ export default function App() {
           agent_id: targetAgent.id,
           name: targetAgent.name,
           llm_model: targetAgent.model || '',
+          temperature: targetAgent.temperature || 0.2,
           conn_url: targetAgent.backendUrl || '',
           api_key: targetAgent.apiKey || '',
           is_primary: targetAgent.isDefault || false,
@@ -683,6 +687,7 @@ export default function App() {
         agent_id: configuringAgentId,
         name: agentName,
         llm_model: agentModel,
+        temperature: 0.2,
         conn_url: agentBackendUrl,
         api_key: agentApiKey,
         is_primary: agentIsPrimary,
@@ -698,6 +703,7 @@ export default function App() {
           agent_id: configuringAgentId,
           name: agentName,
           llm_model: agentModel,
+          temperature: 0.2,
           conn_url: agentBackendUrl,
           api_key: agentApiKey,
           is_primary: agentIsPrimary,
@@ -1681,9 +1687,19 @@ export default function App() {
               <button 
                 onClick={() => setShowIngest(true)}
                 className="p-2 bg-slate-900 hover:bg-slate-800 rounded-full text-white transition-colors shadow-md"
+                title="Ingest Logs / New Incident"
               >
                 <Plus size={20} />
               </button>
+              <div className="h-6 w-px bg-slate-200"></div>
+              {/* User Circular Initials Icon & Jenkins Style Dropdown */}
+              <UserDropdownMenu 
+                user={user} 
+                onSignOut={() => {
+                  setIsAuthenticated(false);
+                  setUser(null);
+                }} 
+              />
             </div>
           </div>
         </header>

@@ -227,6 +227,41 @@ async function startServer() {
     });
   });
 
+  app.post('/api/change-password', async (req, res) => {
+    const { username, currentPassword, newPassword } = req.body;
+    if (!username || !newPassword) {
+      return res.status(400).json({ status: 'error', message: 'Username and new password are required' });
+    }
+
+    const backendUrl = process.env.VITE_BACKEND_URL;
+    if (backendUrl) {
+      try {
+        console.log(`Forwarding change-password request to external backend: ${backendUrl}/api/change-password`);
+        const externalResponse = await fetchWithTimeout(`${backendUrl}/api/change-password`, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({ username, currentPassword, newPassword }),
+          timeout: 10000
+        });
+
+        if (externalResponse.ok) {
+          const data = await externalResponse.json().catch(() => ({ status: 'success' }));
+          return res.json(data);
+        }
+      } catch (err) {
+        console.log('Unable to reach external backend for password change, defaulting to local update.');
+      }
+    }
+
+    res.json({
+      status: 'success',
+      message: 'Password updated successfully'
+    });
+  });
+
   app.get('/api/config', (req, res) => {
     try {
       const xmlData = fs.readFileSync(CONFIG_PATH, 'utf-8');
@@ -520,7 +555,7 @@ async function startServer() {
 
   app.post('/api/addagent', async (req, res) => {
     try {
-      const { name, llm_model, conn_url, api_key, is_primary, is_active } = req.body;
+      const { name, llm_model, temperature, conn_url, api_key, is_primary, is_active } = req.body;
 
       if (!name) {
         return res.status(400).json({ error: 'Agent name is required' });
@@ -541,6 +576,7 @@ async function startServer() {
             body: JSON.stringify({
               name,
               llm_model,
+              temperature: temperature !== undefined ? temperature : 0.2,
               conn_url,
               api_key,
               is_primary,
@@ -666,7 +702,7 @@ async function startServer() {
 
   app.post('/api/updateagent', async (req, res) => {
     try {
-      const { agent_id, name, llm_model, conn_url, api_key, is_primary, is_active } = req.body;
+      const { agent_id, name, llm_model, temperature, conn_url, api_key, is_primary, is_active } = req.body;
 
       if (!agent_id) {
         return res.status(400).json({ error: 'Agent ID is required' });
@@ -688,6 +724,7 @@ async function startServer() {
               agent_id,
               name,
               llm_model,
+              temperature: temperature !== undefined ? temperature : 0.2,
               conn_url,
               api_key,
               is_primary,

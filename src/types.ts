@@ -21,6 +21,7 @@ export interface RCAAgent {
   isDefault?: boolean;
   backendUrl?: string;
   model?: string;
+  temperature?: number;
   apiKey?: string;
   findings: string[];
 }
@@ -45,4 +46,15 @@ export interface Incident {
   logs: LogEntry[];
   possibleRCA?: string;
   confidence: number;
+}
+
+export interface UserProfile {
+  email: string;
+  displayName?: string;
+  role?: string;
+  avatarUrl?: string;
+  initials?: string;
+  bgColor?: string;
+  timezone?: string;
+  apiToken?: string;
 }
