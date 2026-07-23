@@ -1321,7 +1321,7 @@ export default function App() {
                       <option value="" disabled>Select a tool...</option>
                       <optgroup label="Infrastructure & CI/CD">
                         <option value="kubernetes">Kubernetes Cluster</option>
-                        <option value="jenkins">Jenkins CI/CD</option>
+                        <option value="jenkins">Sentry CI/CD / Error Tracking</option>
                         <option value="github">GitHub Actions</option>
                         <option value="gitlab">GitLab Pipeline</option>
                         <option value="sonarqube">SonarQube</option>
@@ -1353,7 +1353,7 @@ export default function App() {
                       type="text" 
                       value={sourceName}
                       onChange={(e) => setSourceName(e.target.value)}
-                      placeholder="e.g. Staging Jenkins"
+                      placeholder="e.g. Staging Sentry"
                       className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
                     />
                   </div>

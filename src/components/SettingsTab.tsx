@@ -30,7 +30,10 @@ import {
   BadgeCheck, 
   Download, 
   Eye, 
-  Sliders
+  Sliders,
+  ArrowLeft,
+  ArrowRight,
+  ChevronRight
 } from 'lucide-react';
 
 interface SettingsTabProps {
@@ -49,7 +52,7 @@ export interface ManagedUser {
   username: string;
   email: string;
   fullName: string;
-  role: 'Jenkins Admin' | 'SRE Engineer' | 'DevOps Developer' | 'Read Only';
+  role: 'Sentry Admin' | 'SRE Engineer' | 'DevOps Developer' | 'Read Only';
   status: 'Active' | 'Inactive';
   lastActive: string;
   createdAt: string;
@@ -59,9 +62,9 @@ const INITIAL_USERS: ManagedUser[] = [
   {
     id: 'usr-1',
     username: 'admin',
-    email: 'admin@jenkins.local',
+    email: 'admin@sentry.local',
     fullName: 'System Administrator',
-    role: 'Jenkins Admin',
+    role: 'Sentry Admin',
     status: 'Active',
     lastActive: 'Just now',
     createdAt: '2026-01-10'
@@ -108,12 +111,12 @@ export default function SettingsTab({
   setAutoRefreshLogs,
   fetchLogs,
 }: SettingsTabProps) {
-  // Top Level Sub-Nav: 'settings-monitoring' | 'user-management'
-  const [activeSubTab, setActiveSubTab] = useState<'settings-monitoring' | 'user-management'>('settings-monitoring');
+  // Navigation State: null (Main Overview Hub) | 'settings-monitoring' | 'user-management'
+  const [activeSubTab, setActiveSubTab] = useState<'settings-monitoring' | 'user-management' | null>(null);
 
   // User Management State
   const [users, setUsers] = useState<ManagedUser[]>(() => {
-    const saved = localStorage.getItem('jenkins_managed_users');
+    const saved = localStorage.getItem('sentry_managed_users');
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -129,7 +132,7 @@ export default function SettingsTab({
 
   // Save users to localStorage
   useEffect(() => {
-    localStorage.setItem('jenkins_managed_users', JSON.stringify(users));
+    localStorage.setItem('sentry_managed_users', JSON.stringify(users));
   }, [users]);
 
   // Modal State for Add/Edit User
@@ -268,190 +271,204 @@ export default function SettingsTab({
       exit={{ opacity: 0, y: -10 }}
       className="max-w-5xl mx-auto space-y-6"
     >
-      {/* Jenkins Settings Header & Sub-Nav Bar */}
-      <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-5">
-          <div>
+      {/* 1. MAIN OVERVIEW HUB (When no subtab is selected) */}
+      {activeSubTab === null && (
+        <div className="bg-white border border-slate-200 rounded-3xl p-8 shadow-sm space-y-8">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-6">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-1 bg-slate-900 text-white font-mono text-[10px] font-bold rounded-lg tracking-widest uppercase">
+                  Sentry Configuration
+                </span>
+                <span className="text-xs text-slate-400 font-medium">v2.440.1-lts</span>
+              </div>
+              <h2 className="text-2xl font-black text-slate-900 tracking-tight mt-1">Manage Sentry</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Configure system settings, monitor live logs, and manage user security permissions.</p>
+            </div>
+
             <div className="flex items-center gap-2">
-              <span className="px-2.5 py-1 bg-slate-900 text-white font-mono text-[10px] font-bold rounded-lg tracking-widest uppercase">
-                Jenkins Configuration
-              </span>
-              <span className="text-xs text-slate-400 font-medium">v2.440.1-lts</span>
+              <div className="px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl text-xs font-bold flex items-center gap-1.5">
+                <ShieldCheck size={14} />
+                <span>System Operational</span>
+              </div>
             </div>
-            <h2 className="text-2xl font-black text-slate-900 tracking-tight mt-1">Manage Jenkins</h2>
-            <p className="text-xs text-slate-500 mt-0.5">Configure system settings, monitor live logs, and manage user security permissions.</p>
           </div>
 
-          <div className="flex items-center gap-2">
-            <div className="px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl text-xs font-bold flex items-center gap-1.5">
-              <ShieldCheck size={14} />
-              <span>System Operational</span>
-            </div>
+          {/* Sentry 2-Menu Section Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('settings-monitoring')}
+              className="p-6 rounded-2xl border border-slate-200 bg-slate-50/50 hover:bg-blue-50/60 hover:border-blue-400 hover:shadow-md transition-all text-left flex items-start gap-4 group"
+            >
+              <div className="p-3.5 rounded-2xl bg-blue-600 text-white shadow-md shadow-blue-500/20 group-hover:scale-105 transition-transform shrink-0">
+                <Activity size={26} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-black text-base text-slate-900 group-hover:text-blue-900">
+                    Settings & Monitoring
+                  </h3>
+                  <ChevronRight size={18} className="text-slate-400 group-hover:text-blue-600 group-hover:translate-x-0.5 transition-all" />
+                </div>
+                <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                  Live stream application logs, log filter controls, and real-time backend diagnostic monitoring.
+                </p>
+                <div className="mt-4 inline-flex items-center gap-1.5 text-xs font-bold text-blue-600 group-hover:underline">
+                  <span>Open Settings & Monitoring</span>
+                  <ArrowRight size={14} />
+                </div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('user-management')}
+              className="p-6 rounded-2xl border border-slate-200 bg-slate-50/50 hover:bg-blue-50/60 hover:border-blue-400 hover:shadow-md transition-all text-left flex items-start gap-4 group"
+            >
+              <div className="p-3.5 rounded-2xl bg-indigo-600 text-white shadow-md shadow-indigo-500/20 group-hover:scale-105 transition-transform shrink-0">
+                <Users size={26} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-black text-base text-slate-900 group-hover:text-indigo-900">
+                    User Management
+                  </h3>
+                  <ChevronRight size={18} className="text-slate-400 group-hover:text-indigo-600 group-hover:translate-x-0.5 transition-all" />
+                </div>
+                <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                  Manage Sentry user credentials, roles, security permissions matrix, and password resets.
+                </p>
+                <div className="mt-4 inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 group-hover:underline">
+                  <span>Open User Management</span>
+                  <ArrowRight size={14} />
+                </div>
+              </div>
+            </button>
           </div>
         </div>
+      )}
 
-        {/* Jenkins 2-Menu Cards / Navigation Tabs */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <button
-            type="button"
-            onClick={() => setActiveSubTab('settings-monitoring')}
-            className={`p-5 rounded-2xl border text-left transition-all relative overflow-hidden group flex items-start gap-4 ${
-              activeSubTab === 'settings-monitoring'
-                ? 'bg-blue-50/70 border-blue-500 shadow-md ring-2 ring-blue-500/20'
-                : 'bg-slate-50/60 border-slate-200 hover:bg-slate-100/80 hover:border-slate-300'
-            }`}
-          >
-            <div className={`p-3 rounded-xl transition-all ${
-              activeSubTab === 'settings-monitoring' ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-200 text-slate-700 group-hover:bg-slate-300'
-            }`}>
-              <Activity size={22} />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between">
-                <h3 className={`font-black text-sm ${activeSubTab === 'settings-monitoring' ? 'text-blue-900' : 'text-slate-800'}`}>
-                  1. Settings & Monitoring
-                </h3>
-                {activeSubTab === 'settings-monitoring' && (
-                  <BadgeCheck size={16} className="text-blue-600 flex-shrink-0" />
-                )}
-              </div>
-              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                Live stream application logs, log filter controls, and real-time backend diagnostic monitoring.
-              </p>
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveSubTab('user-management')}
-            className={`p-5 rounded-2xl border text-left transition-all relative overflow-hidden group flex items-start gap-4 ${
-              activeSubTab === 'user-management'
-                ? 'bg-blue-50/70 border-blue-500 shadow-md ring-2 ring-blue-500/20'
-                : 'bg-slate-50/60 border-slate-200 hover:bg-slate-100/80 hover:border-slate-300'
-            }`}
-          >
-            <div className={`p-3 rounded-xl transition-all ${
-              activeSubTab === 'user-management' ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-200 text-slate-700 group-hover:bg-slate-300'
-            }`}>
-              <Users size={22} />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between">
-                <h3 className={`font-black text-sm ${activeSubTab === 'user-management' ? 'text-blue-900' : 'text-slate-800'}`}>
-                  2. User Management
-                </h3>
-                {activeSubTab === 'user-management' && (
-                  <BadgeCheck size={16} className="text-blue-600 flex-shrink-0" />
-                )}
-              </div>
-              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                Manage Jenkins user credentials, roles, security permissions matrix, and password resets.
-              </p>
-            </div>
-          </button>
-        </div>
-      </div>
-
-      {/* SUB-MENU 1: SETTINGS & MONITORING */}
+      {/* 2. DEDICATED PAGE VIEW: SETTINGS & MONITORING */}
       {activeSubTab === 'settings-monitoring' && (
         <div className="space-y-6">
-          {/* Status & Diagnostic Metrics Card */}
+          {/* Top Bar with Back Provision */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between bg-white border border-slate-200 rounded-2xl p-4 shadow-xs gap-3">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setActiveSubTab(null)}
+                className="flex items-center gap-2 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors shrink-0"
+              >
+                <ArrowLeft size={16} />
+                <span>Back to Manage Sentry</span>
+              </button>
+              <div className="h-4 w-px bg-slate-200 hidden sm:block" />
+              <div className="flex items-center gap-2">
+                <Activity size={18} className="text-blue-600" />
+                <h2 className="text-base font-black text-slate-900">Settings & Monitoring</h2>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-slate-500">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="font-semibold text-emerald-700">Live Telemetry Active</span>
+            </div>
+          </div>
+
+          {/* Status & Diagnostic Metrics Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-2">
               <div className="flex items-center justify-between text-slate-500 text-xs font-bold uppercase tracking-wider">
-                <span>System Logging Engine</span>
+                <span>SYSTEM LOGGING ENGINE</span>
                 <Server size={16} className="text-blue-600" />
               </div>
               <div className="flex items-baseline gap-2">
-                <span className="text-xl font-extrabold text-slate-900">Active</span>
+                <span className="text-2xl font-extrabold text-slate-900">Active</span>
                 <span className="text-xs text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded-md">Realtime</span>
               </div>
               <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500 font-mono">
                 <span>File:</span>
-                <span className="font-bold text-slate-700 truncate max-w-[150px]">{logPath || 'logs/app.log'}</span>
+                <span className="text-slate-800 font-bold">{logPath || 'logs/app.log'}</span>
               </div>
             </div>
 
             <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-2">
               <div className="flex items-center justify-between text-slate-500 text-xs font-bold uppercase tracking-wider">
-                <span>Log Stream Rate</span>
+                <span>LOG STREAM RATE</span>
                 <Cpu size={16} className="text-purple-600" />
               </div>
               <div className="flex items-baseline gap-2">
-                <span className="text-xl font-extrabold text-slate-900">12 msg/s</span>
+                <span className="text-2xl font-extrabold text-slate-900">12 msg/s</span>
                 <span className="text-xs text-purple-600 font-bold bg-purple-50 px-2 py-0.5 rounded-md">Low Latency</span>
               </div>
               <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500 font-mono">
                 <span>Auto Refresh:</span>
-                <span className="font-bold text-slate-700">{autoRefreshLogs ? 'Enabled (5s)' : 'Manual'}</span>
+                <span className="text-slate-800 font-bold">{autoRefreshLogs ? 'Enabled (5s)' : 'Disabled'}</span>
               </div>
             </div>
 
             <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-2">
               <div className="flex items-center justify-between text-slate-500 text-xs font-bold uppercase tracking-wider">
-                <span>Log Storage Usage</span>
+                <span>LOG STORAGE USAGE</span>
                 <HardDrive size={16} className="text-amber-600" />
               </div>
               <div className="flex items-baseline gap-2">
-                <span className="text-xl font-extrabold text-slate-900">2.4 MB</span>
+                <span className="text-2xl font-extrabold text-slate-900">2.4 MB</span>
                 <span className="text-xs text-amber-600 font-bold bg-amber-50 px-2 py-0.5 rounded-md">Optimal</span>
               </div>
               <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500 font-mono">
                 <span>Retention:</span>
-                <span className="font-bold text-slate-700">7 Days Rolling</span>
+                <span className="text-slate-800 font-bold">7 Days Rolling</span>
               </div>
             </div>
           </div>
 
-          {/* Action Bar & Log Refresh */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
+          {/* Action Header bar */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-slate-900 text-white rounded-xl">
+              <div className="p-2.5 bg-slate-900 text-white rounded-xl shadow-xs">
                 <Terminal size={18} />
               </div>
               <div>
-                <h4 className="font-bold text-slate-800 text-sm">System & Pipeline Console Log Stream</h4>
+                <h3 className="font-bold text-sm text-slate-900">System & Pipeline Console Log Stream</h3>
                 <p className="text-xs text-slate-500">View real-time backend events, RCA agent calls, and HTTP API traffic.</p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <button
-                onClick={fetchLogs}
-                disabled={isLoadingLogs}
-                className="flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all disabled:opacity-50 shadow-sm"
-              >
-                <RefreshCw size={14} className={isLoadingLogs ? 'animate-spin' : ''} />
-                {isLoadingLogs ? 'Refreshing...' : 'Refresh Logs'}
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={fetchLogs}
+              disabled={isLoadingLogs}
+              className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-sm transition-all flex items-center gap-2 disabled:opacity-50 shrink-0"
+            >
+              <RefreshCw size={14} className={isLoadingLogs ? 'animate-spin' : ''} />
+              <span>Refresh Logs</span>
+            </button>
           </div>
 
-          {/* Logs Console */}
-          <div className="bg-slate-950 rounded-3xl border border-slate-900 shadow-xl overflow-hidden flex flex-col h-[550px]">
-            {/* Console Header */}
-            <div className="bg-slate-900 px-5 py-3.5 border-b border-slate-900/50 flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div className="flex items-center gap-4">
+          {/* Log Stream Terminal Container */}
+          <div className="bg-slate-950 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl">
+            {/* Console Toolbar */}
+            <div className="bg-slate-900 px-5 py-3 border-b border-slate-800/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
                 <div className="flex gap-1.5">
-                  <span className="w-3 h-3 bg-red-500/80 rounded-full" />
-                  <span className="w-3 h-3 bg-yellow-500/80 rounded-full" />
-                  <span className="w-3 h-3 bg-green-500/80 rounded-full" />
+                  <span className="w-3 h-3 rounded-full bg-red-500/80" />
+                  <span className="w-3 h-3 rounded-full bg-amber-500/80" />
+                  <span className="w-3 h-3 rounded-full bg-emerald-500/80" />
                 </div>
-                <span className="text-xs text-slate-400 font-mono tracking-tight flex items-center gap-2">
-                  <Terminal size={14} className="text-slate-500" />
-                  {logPath ? logPath.split('/').pop() : 'app.log'} — active stream
+                <span className="text-slate-400 font-mono text-xs ml-2 font-bold">
+                  &gt;_ app.log — active stream
                 </span>
               </div>
 
-              <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
-                {/* Log Filter Input */}
-                <div className="relative w-full sm:w-52">
+              <div className="flex items-center gap-3 w-full sm:w-auto">
+                <div className="relative flex-1 sm:w-64">
                   <input
                     type="text"
-                    placeholder="Filter console log..."
                     value={logFilter}
                     onChange={(e) => setLogFilter(e.target.value)}
-                    className="w-full bg-slate-950/80 border border-slate-800 text-slate-200 rounded-xl px-3 py-1.5 text-xs focus:outline-none focus:border-slate-700 font-mono"
+                    placeholder="Filter console log..."
+                    className="w-full bg-slate-950 border border-slate-800 text-slate-200 placeholder-slate-500 text-xs rounded-xl px-3 py-1.5 font-mono focus:outline-none focus:border-blue-500/50"
                   />
                   {logFilter && (
                     <button 
@@ -463,82 +480,88 @@ export default function SettingsTab({
                   )}
                 </div>
 
-                {/* Auto refresh switch */}
-                <label className="flex items-center gap-2 cursor-pointer select-none whitespace-nowrap">
+                <label className="flex items-center gap-2 text-slate-400 text-xs font-mono cursor-pointer shrink-0">
                   <input
                     type="checkbox"
                     checked={autoRefreshLogs}
                     onChange={(e) => setAutoRefreshLogs(e.target.checked)}
-                    className="sr-only peer"
+                    className="rounded bg-slate-950 border-slate-800 text-blue-500 focus:ring-0 focus:ring-offset-0"
                   />
-                  <div className="w-7 h-4 bg-slate-800 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-slate-400 after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-600 peer-checked:after:bg-white relative"></div>
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Auto (5s)</span>
+                  <span>AUTO (5S)</span>
                 </label>
               </div>
             </div>
 
-            {/* Console Output */}
-            <div className="flex-1 overflow-y-auto p-5 font-mono text-xs leading-relaxed space-y-1 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent">
-              {(() => {
-                const allLines = logs.split('\n');
-                const filteredLines = allLines.filter(line => 
-                  !logFilter || line.toLowerCase().includes(logFilter.toLowerCase())
-                );
-
-                if (filteredLines.length === 0 || (filteredLines.length === 1 && !filteredLines[0])) {
-                  return (
-                    <div className="h-full flex flex-col items-center justify-center text-slate-600 space-y-2">
-                      <Terminal size={28} className="text-slate-700 animate-pulse" />
-                      <p className="text-xs">No matching log entries found.</p>
-                    </div>
-                  );
-                }
-
-                return filteredLines.map((line, index) => {
-                  if (!line.trim()) return null;
-
-                  let colorClass = 'text-slate-400';
-                  if (line.includes('[ERROR]')) {
-                    colorClass = 'text-red-400 font-medium';
-                  } else if (line.includes('[WARN]')) {
-                    colorClass = 'text-yellow-400/90 font-medium';
-                  } else if (line.includes('[HTTP]')) {
+            {/* Console Output Area */}
+            <div className="p-5 font-mono text-xs text-slate-300 h-96 overflow-y-auto space-y-1 scrollbar-thin scrollbar-thumb-slate-800">
+              {isLoadingLogs && !logs ? (
+                <div className="flex items-center justify-center h-full text-slate-500 gap-2">
+                  <RefreshCw size={16} className="animate-spin" />
+                  <span>Loading backend system logs...</span>
+                </div>
+              ) : !logs ? (
+                <div className="text-slate-500 italic p-4 text-center">No logs available or empty log stream.</div>
+              ) : (
+                logs.split('\n').filter(line => !logFilter || line.toLowerCase().includes(logFilter.toLowerCase())).map((line, idx) => {
+                  let colorClass = 'text-slate-300';
+                  if (line.includes('ERROR') || line.includes('CRITICAL') || line.includes('500') || line.includes('Failed')) {
+                    colorClass = 'text-red-400 font-bold bg-red-950/30 px-1 rounded';
+                  } else if (line.includes('WARN') || line.includes('404')) {
+                    colorClass = 'text-amber-400';
+                  } else if (line.includes('INFO') || line.includes('200')) {
                     colorClass = 'text-cyan-400';
-                  } else if (line.includes('[INFO]')) {
-                    colorClass = 'text-slate-300';
                   }
-
                   return (
-                    <div key={index} className="hover:bg-slate-900/40 px-2 py-0.5 rounded transition-all flex items-start gap-3 border-l-2 border-transparent hover:border-slate-800">
-                      <span className="text-slate-700 select-none text-[10px] w-8 text-right shrink-0">{index + 1}</span>
-                      <span className={colorClass}>{line}</span>
+                    <div key={idx} className="flex items-start gap-3 hover:bg-slate-900/50 px-2 py-0.5 rounded leading-relaxed">
+                      <span className="text-slate-600 select-none w-8 text-right shrink-0 font-mono text-[11px]">{idx + 1}</span>
+                      <span className={`${colorClass} break-all font-mono`}>{line}</span>
                     </div>
                   );
-                });
-              })()}
+                })
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {/* SUB-MENU 2: USER MANAGEMENT */}
+      {/* 3. DEDICATED PAGE VIEW: USER MANAGEMENT */}
       {activeSubTab === 'user-management' && (
         <div className="space-y-6">
-          {/* User Management Toolbar */}
-          <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm space-y-4">
-            <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-              <div>
-                <h3 className="text-base font-bold text-slate-900">Jenkins Users & Security Permissions</h3>
-                <p className="text-xs text-slate-500">Configure access control, roles, and password management for all registered operators.</p>
+          {/* Top Bar with Back Provision */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between bg-white border border-slate-200 rounded-2xl p-4 shadow-xs gap-3">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setActiveSubTab(null)}
+                className="flex items-center gap-2 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors shrink-0"
+              >
+                <ArrowLeft size={16} />
+                <span>Back to Manage Sentry</span>
+              </button>
+              <div className="h-4 w-px bg-slate-200 hidden sm:block" />
+              <div className="flex items-center gap-2">
+                <Users size={18} className="text-indigo-600" />
+                <h2 className="text-base font-black text-slate-900">User Management</h2>
               </div>
-
+            </div>
+            <div className="flex items-center gap-2">
               <button
                 onClick={openAddUserModal}
-                className="w-full md:w-auto px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 transition-all flex items-center justify-center gap-2"
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 transition-all flex items-center gap-2"
               >
                 <UserPlus size={16} />
                 <span>Add New User</span>
               </button>
+            </div>
+          </div>
+
+          {/* User Management Toolbar */}
+          <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm space-y-4">
+            <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Sentry Users & Security Permissions</h3>
+                <p className="text-xs text-slate-500">Configure access control, roles, and password management for all registered operators.</p>
+              </div>
             </div>
 
             {/* Filter & Search Bar */}
@@ -562,7 +585,7 @@ export default function SettingsTab({
                   className="bg-slate-50 border border-slate-200 text-slate-700 text-xs font-semibold rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500/20 w-full sm:w-auto"
                 >
                   <option value="ALL">All Roles ({users.length})</option>
-                  <option value="Jenkins Admin">Jenkins Admin</option>
+                  <option value="Sentry Admin">Sentry Admin</option>
                   <option value="SRE Engineer">SRE Engineer</option>
                   <option value="DevOps Developer">DevOps Developer</option>
                   <option value="Read Only">Read Only</option>
@@ -606,7 +629,7 @@ export default function SettingsTab({
                               <div>
                                 <div className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
                                   <span>{u.fullName}</span>
-                                  {u.role === 'Jenkins Admin' && (
+                                  {u.role === 'Sentry Admin' && (
                                     <span title="Admin Access"><Shield size={12} className="text-blue-600" /></span>
                                   )}
                                 </div>
@@ -617,7 +640,7 @@ export default function SettingsTab({
 
                           <td className="px-6 py-4">
                             <span className={`px-2.5 py-1 rounded-lg text-[10px] font-extrabold tracking-wider uppercase inline-block ${
-                              u.role === 'Jenkins Admin'
+                              u.role === 'Sentry Admin'
                                 ? 'bg-purple-50 text-purple-700 border border-purple-200'
                                 : u.role === 'SRE Engineer'
                                 ? 'bg-blue-50 text-blue-700 border border-blue-200'
@@ -689,8 +712,8 @@ export default function SettingsTab({
                 <ShieldCheck size={20} />
               </div>
               <div>
-                <h3 className="text-base font-bold text-slate-900">Jenkins Security & Role Permission Matrix</h3>
-                <p className="text-xs text-slate-500">Summary of capabilities granted per user role level in Jenkins.</p>
+                <h3 className="text-base font-bold text-slate-900">Sentry Security & Role Permission Matrix</h3>
+                <p className="text-xs text-slate-500">Summary of capabilities granted per user role level in Sentry.</p>
               </div>
             </div>
 
@@ -699,7 +722,7 @@ export default function SettingsTab({
                 <thead>
                   <tr className="bg-slate-50/80 border-b border-slate-200 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                     <th className="px-4 py-3">Permission Scope</th>
-                    <th className="px-4 py-3 text-center">Jenkins Admin</th>
+                    <th className="px-4 py-3 text-center">Sentry Admin</th>
                     <th className="px-4 py-3 text-center">SRE Engineer</th>
                     <th className="px-4 py-3 text-center">DevOps Developer</th>
                     <th className="px-4 py-3 text-center">Read Only</th>
@@ -752,7 +775,7 @@ export default function SettingsTab({
                 </div>
                 <div>
                   <h2 className="text-base font-bold text-slate-800">
-                    {editingUserId ? 'Edit User Credentials' : 'Create New Jenkins User'}
+                    {editingUserId ? 'Edit User Credentials' : 'Create New Sentry User'}
                   </h2>
                   <p className="text-xs text-slate-400">Configure username, email, and security role</p>
                 </div>
@@ -816,7 +839,7 @@ export default function SettingsTab({
                   onChange={(e) => setFormRole(e.target.value as ManagedUser['role'])}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 >
-                  <option value="Jenkins Admin">Jenkins Admin (Full System Access)</option>
+                  <option value="Sentry Admin">Sentry Admin (Full System Access)</option>
                   <option value="SRE Engineer">SRE Engineer (RCA & Diagnostic Logs)</option>
                   <option value="DevOps Developer">DevOps Developer (Trigger & View Builds)</option>
                   <option value="Read Only">Read Only (Auditor View)</option>
