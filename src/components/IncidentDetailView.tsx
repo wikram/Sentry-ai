@@ -16,6 +16,7 @@ import {
   Cpu 
 } from 'lucide-react';
 import { Incident, RCAAgent } from '../types';
+import { formatDateTime } from '../lib/dateUtils';
 
 interface IncidentDetailViewProps {
   incident: Incident;
@@ -44,7 +45,7 @@ export default function IncidentDetailView({ incident, agents, onClose }: Incide
             </span>
           </div>
           <div className="flex items-center gap-6 mt-4 text-[11px] font-bold text-slate-400 uppercase tracking-widest">
-            <span className="flex items-center gap-2"><Clock size={14} className="text-slate-300" /> Created {new Date(incident.createdAt).toLocaleTimeString()}</span>
+            <span className="flex items-center gap-2"><Clock size={14} className="text-slate-300" /> Created {formatDateTime(incident.createdAt)}</span>
             <span className="flex items-center gap-2"><Activity size={14} className="text-blue-400" /> Sources: {incident.sourceTools.join(', ')}</span>
           </div>
         </div>

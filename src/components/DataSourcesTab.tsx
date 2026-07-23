@@ -6,6 +6,7 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Search, Save, Plus, AlertTriangle, Activity, ExternalLink, Power, PowerOff, Settings, ShieldAlert } from 'lucide-react';
+import { formatDateTime } from '../lib/dateUtils';
 
 interface DataSource {
   id: string;
@@ -134,7 +135,7 @@ export default function DataSourcesTab({
                     {job.lastBuild && (
                       <div className="text-right">
                         <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Failed on</p>
-                        <p className="text-xs font-mono text-slate-600">{new Date(job.lastBuild.timestamp).toLocaleString()}</p>
+                        <p className="text-xs font-mono text-slate-600">{formatDateTime(job.lastBuild.timestamp)}</p>
                       </div>
                     )}
                     <a 
@@ -181,7 +182,7 @@ export default function DataSourcesTab({
                 </div>
                 <div className="text-right">
                   <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Last Sync</p>
-                  <p className="text-xs font-mono text-slate-600">{source.lastSync ? new Date(source.lastSync).toLocaleTimeString() : 'Never'}</p>
+                  <p className="text-xs font-mono text-slate-600">{source.lastSync ? formatDateTime(source.lastSync) : 'Never'}</p>
                 </div>
                 <div className="relative">
                   <button 

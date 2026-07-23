@@ -7,6 +7,7 @@ import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import { Trash2, History, Terminal, Clock, ChevronRight } from 'lucide-react';
+import { formatDateTime } from '../lib/dateUtils';
 
 interface HistoryItem {
   id: string;
@@ -82,7 +83,7 @@ export default function HistoryTab({
                       </span>
                     </div>
                     <div className="flex items-center gap-3 text-[11px] font-medium text-slate-400 uppercase tracking-widest">
-                      <span className="flex items-center gap-1.5"><Clock size={12} /> {new Date(item.timestamp).toLocaleString()}</span>
+                      <span className="flex items-center gap-1.5"><Clock size={12} /> {formatDateTime(item.timestamp)}</span>
                       <span className="text-slate-200">|</span>
                       <span>{item.input.length} characters analyzed</span>
                     </div>

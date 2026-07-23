@@ -7,6 +7,7 @@ import React from 'react';
 import { ChevronRight, Clock } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Incident } from '../types';
+import { formatShortDateTime } from '../lib/dateUtils';
 
 export function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode, label: string, active?: boolean, onClick: () => void }) {
   return (
@@ -70,7 +71,7 @@ export const IncidentRow: React.FC<IncidentRowProps> = ({ incident, onClick }) =
       </div>
       <div className="col-span-2 flex items-center gap-2 text-[11px] text-slate-400 font-mono">
         <Clock size={12} className="text-slate-300" />
-        {new Date(incident.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        {formatShortDateTime(incident.createdAt)}
       </div>
       <div className="col-span-2 flex justify-end">
         <div className="p-1 px-2 rounded-lg bg-transparent group-hover:bg-slate-200 transition-colors">

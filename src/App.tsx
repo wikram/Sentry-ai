@@ -39,6 +39,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI } from "@google/genai";
 import { Incident, RCAAgent } from './types';
 import { MOCK_INCIDENTS } from './mockData';
+import { formatDateTime, formatShortDateTime } from './lib/dateUtils';
 
 import Login from './components/Login';
 import IncidentDetailView from './components/IncidentDetailView';
@@ -171,13 +172,13 @@ export default function App() {
         agent,
         status: humanStatus,
         details: data,
-        timestamp: new Date().toLocaleString(),
+        timestamp: formatDateTime(new Date()),
         success: response.ok
       };
 
       setDiagnosticsMap(prev => ({
         ...prev,
-        [agent.id]: { status: humanStatus, timestamp: new Date().toLocaleTimeString(), loading: false }
+        [agent.id]: { status: humanStatus, timestamp: formatDateTime(new Date()), loading: false }
       }));
       setDiagnosticsResult(result);
       setShowDiagnosticsModal(true);
@@ -187,12 +188,12 @@ export default function App() {
         agent,
         status: `Offline: ${errorMsg}`,
         details: { error: errorMsg },
-        timestamp: new Date().toLocaleString(),
+        timestamp: formatDateTime(new Date()),
         success: false
       };
       setDiagnosticsMap(prev => ({
         ...prev,
-        [agent.id]: { status: `Offline: ${errorMsg}`, timestamp: new Date().toLocaleTimeString(), loading: false }
+        [agent.id]: { status: `Offline: ${errorMsg}`, timestamp: formatDateTime(new Date()), loading: false }
       }));
       setDiagnosticsResult(result);
       setShowDiagnosticsModal(true);
@@ -1852,7 +1853,7 @@ const IncidentRow: React.FC<{ incident: Incident, onClick: () => void }> = ({ in
       </div>
       <div className="col-span-2 flex items-center gap-2 text-[11px] text-slate-400 font-mono">
         <Clock size={12} className="text-slate-300" />
-        {new Date(incident.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        {formatShortDateTime(incident.createdAt)}
       </div>
       <div className="col-span-2 flex justify-end">
         <div className="p-1 px-2 rounded-lg bg-transparent group-hover:bg-slate-200 transition-colors">
