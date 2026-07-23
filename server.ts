@@ -5,7 +5,6 @@ import fs from 'fs';
 import { XMLParser, XMLBuilder } from 'fast-xml-parser';
 import yaml from 'js-yaml';
 import multer from 'multer';
-import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -366,6 +365,38 @@ async function startServer() {
     } catch (error) {
       console.error('Error in /api/llm-model:', error);
       res.status(500).json({ error: 'Failed to retrieve LLM model' });
+    }
+  });
+
+  app.get('/api/models', async (req, res) => {
+    try {
+      const backendUrl = process.env.VITE_BACKEND_URL;
+      if (backendUrl) {
+        console.log(`Forwarding GET /api/models to external backend: ${backendUrl}/api/models`);
+        try {
+          const response = await fetchWithTimeout(`${backendUrl}/api/models`, {
+            headers: { 'Accept': 'application/json' },
+            timeout: 10000
+          });
+          if (response.ok) {
+            const data = await response.json();
+            return res.json(data);
+          }
+        } catch (fetchErr) {
+          console.log(`Unable to fetch /api/models from external backend.`);
+        }
+      }
+
+      // Server fetches supported models from OpenRouter server-side
+      const response = await fetchWithTimeout('https://openrouter.ai/api/v1/models', { timeout: 10000 });
+      if (response.ok) {
+        const data = await response.json();
+        return res.json(data);
+      }
+      res.status(500).json({ error: 'Failed to fetch models from OpenRouter' });
+    } catch (error) {
+      console.error('Error in /api/models:', error);
+      res.status(500).json({ error: 'Failed to retrieve models list' });
     }
   });
 
@@ -1023,53 +1054,81 @@ async function startServer() {
     }
   });
 
+async function callOpenRouterAI(logs: string, description: string, modelOverride?: string, apiKeyOverride?: string, fileNotice?: string) {
+  const apiKey = apiKeyOverride || process.env.OPENROUTER_API_KEY || process.env.OPEN_ROUTER_API_KEY || process.env.OPENROUTER_KEY || process.env.GEMINI_API_KEY;
+
+  if (!apiKey) {
+    const errorCount = (logs.match(/\[ERROR\]|\[FATAL\]/g) || []).length;
+    const warnCount = (logs.match(/\[WARN\]/g) || []).length;
+
+    let report = `### INTELLIGENT ANALYSIS REPORT (Basic Engine${fileNotice ? ` - ${fileNotice}` : ''})\n\n`;
+    report += `DETECTED ANOMALIES:\n`;
+    report += `---------------------\n`;
+    report += `• Critical Failures: ${errorCount}\n`;
+    report += `• System Warnings:   ${warnCount}\n\n`;
+    report += `Note: OPENROUTER_API_KEY is not set. Using basic heuristic analysis.\n`;
+    return report;
+  }
+
+  const model = modelOverride || 'google/gemini-2.5-flash';
+
+  const response = await fetchWithTimeout('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': process.env.APP_URL || 'http://localhost:3000',
+      'X-Title': 'Sentry Log Analyzer'
+    },
+    body: JSON.stringify({
+      model: model,
+      messages: [
+        {
+          role: 'user',
+          content: `You are an expert SRE and Log Analysis Agent. 
+Analyze the following system logs ${fileNotice ? `from "${fileNotice}" ` : ''}and provide a concise, high-impact report.
+
+User Context/Instructions: ${description || "General analysis"}
+
+Logs:
+${logs.slice(0, 20000)}
+
+Provide the report in Markdown format. 
+Focus on:
+1. Detected Anomalies/Errors
+2. Potential Root Causes
+3. Recommended Actions`
+        }
+      ]
+    }),
+    timeout: 30000
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`OpenRouter API error (${response.status}):`, errorText);
+    throw new Error(`OpenRouter API call failed with status ${response.status}`);
+  }
+
+  const data = await response.json();
+  const content = data.choices?.[0]?.message?.content;
+  if (!content) {
+    throw new Error('No content returned from OpenRouter API');
+  }
+
+  return content;
+}
+
   app.post('/api/analyze', async (req, res) => {
     try {
-      const { logs, description } = req.body;
+      const { logs, description, model, apiKey } = req.body;
 
       if (!logs) {
         return res.status(400).json({ error: 'No logs provided' });
       }
 
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) {
-        // Fallback to basic analysis
-        const errorCount = (logs.match(/\[ERROR\]|\[FATAL\]/g) || []).length;
-        const warnCount = (logs.match(/\[WARN\]/g) || []).length;
-        
-        let report = `### INTELLIGENT ANALYSIS REPORT (Basic Engine)\n\n`;
-        report += `DETECTED ANOMALIES:\n`;
-        report += `---------------------\n`;
-        report += `• Critical Failures: ${errorCount}\n`;
-        report += `• System Warnings:   ${warnCount}\n\n`;
-        report += `Note: GEMINI_API_KEY is not set. Using basic heuristic analysis.\n`;
-        
-        return res.json({ report });
-      }
-
-      const ai = new GoogleGenAI({ apiKey });
-      const prompt = `
-        You are an expert SRE and Log Analysis Agent. 
-        Analyze the following system logs and provide a concise, high-impact report.
-        
-        User Context/Instructions: ${description || "General analysis"}
-        
-        Logs:
-        ${logs.slice(0, 20000)}
-        
-        Provide the report in Markdown format. 
-        Focus on:
-        1. Detected Anomalies/Errors
-        2. Potential Root Causes
-        3. Recommended Actions
-      `;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt
-      });
-
-      res.json({ report: response.text });
+      const report = await callOpenRouterAI(logs, description, model, apiKey);
+      res.json({ report });
     } catch (error) {
       console.error('Analysis failed:', error);
       res.status(500).json({ error: 'Log analysis engine failed' });
@@ -1079,6 +1138,8 @@ async function startServer() {
   app.post('/api/analyze-file', upload.single('file'), async (req, res) => {
     try {
       const description = req.body.description || "General analysis";
+      const model = req.body.model;
+      const apiKey = req.body.apiKey;
       const file = req.file;
 
       if (!file) {
@@ -1090,46 +1151,8 @@ async function startServer() {
       // Basic cleanup: remove the temporary file
       fs.unlinkSync(file.path);
 
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) {
-        // Fallback to basic analysis if no API key is provided
-        const errorCount = (logs.match(/\[ERROR\]|\[FATAL\]/g) || []).length;
-        const warnCount = (logs.match(/\[WARN\]/g) || []).length;
-        
-        let report = `### INTELLIGENT ANALYSIS REPORT (Basic Engine - File Mode)\n\n`;
-        report += `FILE ANALYZED: ${file.originalname}\n`;
-        report += `DETECTED ANOMALIES:\n`;
-        report += `---------------------\n`;
-        report += `• Critical Failures: ${errorCount}\n`;
-        report += `• System Warnings:   ${warnCount}\n\n`;
-        report += `Note: GEMINI_API_KEY is not set. Using basic heuristic analysis.\n`;
-        
-        return res.json({ report });
-      }
-
-      const ai = new GoogleGenAI({ apiKey });
-      const prompt = `
-        You are an expert SRE and Log Analysis Agent. 
-        Analyze the following system logs from the file "${file.originalname}" and provide a concise, high-impact report.
-        
-        User Context/Instructions: ${description}
-        
-        Logs:
-        ${logs.slice(0, 20000)}
-        
-        Provide the report in Markdown format. 
-        Focus on:
-        1. Detected Anomalies/Errors
-        2. Potential Root Causes
-        3. Recommended Actions
-      `;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt
-      });
-
-      res.json({ report: response.text });
+      const report = await callOpenRouterAI(logs, description, model, apiKey, file.originalname);
+      res.json({ report });
     } catch (error) {
       console.error('File analysis failed:', error);
       res.status(500).json({ error: 'Log analysis engine (file mode) failed' });

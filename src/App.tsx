@@ -36,7 +36,6 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI } from "@google/genai";
 import { Incident, RCAAgent } from './types';
 import { MOCK_INCIDENTS } from './mockData';
 import { formatDateTime, formatShortDateTime } from './lib/dateUtils';
@@ -235,11 +234,16 @@ export default function App() {
 
       let report = '';
 
+      const activeModel = defaultAgent?.model || selectedModel || 'google/gemini-2.5-flash';
+      const activeApiKey = defaultAgent?.apiKey || '';
+
       // 1. Handle File Upload if in file mode
       if (isFileInputMode && selectedFile) {
         const formData = new FormData();
         formData.append('file', selectedFile);
         formData.append('description', description || "Analysis request");
+        if (activeModel) formData.append('model', activeModel);
+        if (activeApiKey) formData.append('apiKey', activeApiKey);
 
         const targetUrl = preferredBackend ? `${preferredBackend}/api/analyze-file` : '/api/analyze-file';
         const response = await fetch(targetUrl, { method: 'POST', body: formData });
@@ -256,7 +260,12 @@ export default function App() {
       } else {
         // 2. Handle Log Stream Analysis
         const targetUrl = preferredBackend ? `${preferredBackend}/api/analyze` : '/api/analyze';
-        const payload = { logs: logStream, description: description || "System log analysis request" };
+        const payload = { 
+          logs: logStream, 
+          description: description || "System log analysis request",
+          model: activeModel,
+          apiKey: activeApiKey
+        };
         
         try {
           const res = await fetch(targetUrl, {
@@ -276,7 +285,7 @@ export default function App() {
             report = text;
           }
         } catch (err) {
-          // Fallback to local server endpoint if external failed, then to Gemini SDK
+          // Fallback to local server endpoint if external failed
           console.warn('Primary backend endpoint failed, trying local /api/analyze fallback:', err);
           
           let fallbackSuccess = false;
@@ -303,16 +312,7 @@ export default function App() {
           }
 
           if (!fallbackSuccess) {
-            const apiKey = process.env.GEMINI_API_KEY;
-            if (!apiKey) throw new Error(`Backend unavailable and no local API key found: ${err instanceof Error ? err.message : 'Unknown error'}`);
-            
-            const ai = new GoogleGenAI({ apiKey });
-            const prompt = `System Log Analysis:\n${description}\n\nLogs:\n${logStream.slice(0, 15000)}`;
-            const res = await ai.models.generateContent({
-              model: "gemini-3-flash-preview",
-              contents: prompt
-            });
-            report = res.text || "No analysis generated.";
+            throw new Error(`Analysis failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
           }
         }
       }
@@ -447,8 +447,8 @@ export default function App() {
           setApiBackendUrl(configData.apiBackendUrl);
         }
 
-        // Then fetch supported models
-        const modelsRes = await fetch('https://openrouter.ai/api/v1/models');
+        // Then fetch supported models via backend
+        const modelsRes = await fetch('/api/models');
         const modelsData = await modelsRes.json();
         const models = (modelsData.data || []).sort((a: any, b: any) => {
           const nameA = a.name || a.id;
