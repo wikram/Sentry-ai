@@ -58,8 +58,23 @@ import { NavItem } from './components/Common';
 const CONFIGURED_BACKEND_URL = (import.meta as any).env?.VITE_BACKEND_URL || "";
 
 export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [user, setUser] = useState<{ email: string } | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    return localStorage.getItem('sentry_is_authenticated') === 'true';
+  });
+  const [user, setUser] = useState<{ email: string } | null>(() => {
+    const saved = localStorage.getItem('sentry_authenticated_user');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) { /* ignore */ }
+    }
+    return null;
+  });
+
+  const handleSignOut = () => {
+    localStorage.removeItem('sentry_is_authenticated');
+    localStorage.removeItem('sentry_authenticated_user');
+    setIsAuthenticated(false);
+    setUser(null);
+  };
   const [activeTab, setActiveTab] = useState<'dashboard' | 'history' | 'log-analyzer' | 'agents' | 'data-sources' | 'integrations' | 'models' | 'settings'>('dashboard');
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
   const [sources, setSources] = useState<any[]>([]);
@@ -896,9 +911,11 @@ export default function App() {
   if (!isAuthenticated) {
     return (
       <Login 
-        onLogin={(user) => { 
+        onLogin={(loggedInUser) => { 
+          localStorage.setItem('sentry_is_authenticated', 'true');
+          localStorage.setItem('sentry_authenticated_user', JSON.stringify(loggedInUser));
           setIsAuthenticated(true); 
-          setUser(user); 
+          setUser(loggedInUser); 
           fetchAndSetAgents();
           fetchLlmModel();
         }} 
@@ -1640,7 +1657,7 @@ export default function App() {
             icon={<LogOut size={18} className="text-red-400" />} 
             label="Sign Out" 
             active={false} 
-            onClick={() => { setIsAuthenticated(false); setUser(null); }} 
+            onClick={handleSignOut} 
           />
         </div>
       </aside>
@@ -1696,10 +1713,7 @@ export default function App() {
               {/* User Circular Initials Icon & Jenkins Style Dropdown */}
               <UserDropdownMenu 
                 user={user} 
-                onSignOut={() => {
-                  setIsAuthenticated(false);
-                  setUser(null);
-                }} 
+                onSignOut={handleSignOut} 
               />
             </div>
           </div>
