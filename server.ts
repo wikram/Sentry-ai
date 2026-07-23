@@ -461,13 +461,15 @@ async function startServer() {
                 const id = parseAgentField(a[0]);
                 const name = parseAgentField(a[1]);
                 const model = parseAgentField(a[2]);
-                const agentBackendUrl = parseAgentField(a[3]);
+                const rawAgentBackendUrl = parseAgentField(a[3]);
                 const apiKey = parseAgentField(a[4]);
                 const isPrimaryVal = parseAgentField(a[5]);
                 const isActiveVal = parseAgentField(a[6]);
 
                 const isDefault = isPrimaryVal === 'true' || isPrimaryVal === '1' || a[5] === true;
                 const isActive = isActiveVal === 'true' || isActiveVal === '1' || a[6] === true || a[6] === undefined;
+
+                const agentBackendUrl = (rawAgentBackendUrl && rawAgentBackendUrl !== '0.2' && isNaN(Number(rawAgentBackendUrl))) ? rawAgentBackendUrl : '';
 
                 return {
                   id: id ? id.replace(/^agent-/, '').trim() : String(Date.now()),
@@ -476,7 +478,7 @@ async function startServer() {
                   avatar: 'Cpu',
                   status: 'idle',
                   isActive,
-                  backendUrl: agentBackendUrl || '',
+                  backendUrl: agentBackendUrl,
                   model: model || '',
                   apiKey: apiKey || '',
                   isDefault,
@@ -486,7 +488,8 @@ async function startServer() {
                 const id = String(a.id || a.agent_id || '');
                 const name = String(a.name || '');
                 const model = String(a.llm_model || a.model || '');
-                const backendUrl = String(a.conn_url || a.backendUrl || '');
+                const rawBackendUrl = String(a.conn_url || a.backendUrl || '');
+                const backendUrl = (rawBackendUrl && rawBackendUrl !== '0.2' && isNaN(Number(rawBackendUrl))) ? rawBackendUrl : '';
                 const apiKey = String(a.api_key || a.apiKey || '');
                 const isDefault = a.is_primary === true || a.is_primary === 'true' || a.isDefault === true || a.isDefault === 'true';
                 const isActive = a.is_active !== false && a.is_active !== 'false' && a.isActive !== false && a.isActive !== 'false';

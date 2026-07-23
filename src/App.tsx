@@ -161,16 +161,14 @@ export default function App() {
   };
 
   const handleCheckDiagnostics = async (agent: RCAAgent) => {
-    if (!agent.backendUrl) return;
-
     setDiagnosticsMap(prev => ({
       ...prev,
       [agent.id]: { ...(prev[agent.id] || {}), loading: true, status: 'Checking...' }
     }));
 
     try {
-      const baseUrl = agent.backendUrl.replace(/\/$/, '');
-      const targetUrl = `${baseUrl}/api/health`;
+      const isValidExternal = agent.backendUrl && (agent.backendUrl.startsWith('http://') || agent.backendUrl.startsWith('https://'));
+      const targetUrl = isValidExternal ? `${agent.backendUrl.replace(/\/$/, '')}/api/health` : '/api/health';
       const proxyUrl = `/api/diagnostics?url=${encodeURIComponent(targetUrl)}`;
       
       const response = await fetch(proxyUrl);
@@ -220,12 +218,11 @@ export default function App() {
 
   const handleAnalyzeLogs = async () => {
     const defaultAgent = agents.find(a => a.isDefault) || agents.find(a => a.isActive) || agents[0];
-    const preferredBackend = defaultAgent?.backendUrl || apiBackendUrl;
-
-    if (!preferredBackend) {
-      alert("No backend system configured. Please add an agent or specify a backend URL.");
-      return;
-    }
+    const rawBackend = defaultAgent?.backendUrl || apiBackendUrl || '';
+    
+    // Check if the configured backend URL is a valid http/https endpoint
+    const isValidExternalBackend = rawBackend && (rawBackend.startsWith('http://') || rawBackend.startsWith('https://'));
+    const preferredBackend = isValidExternalBackend ? rawBackend.replace(/\/$/, '') : '';
 
     setIsAnalyzing(true);
     setAnalysisResult('Initializing autonomous analysis engine...');
@@ -244,7 +241,7 @@ export default function App() {
         formData.append('file', selectedFile);
         formData.append('description', description || "Analysis request");
 
-        const targetUrl = `${preferredBackend.replace(/\/$/, '')}/api/analyze-file`;
+        const targetUrl = preferredBackend ? `${preferredBackend}/api/analyze-file` : '/api/analyze-file';
         const response = await fetch(targetUrl, { method: 'POST', body: formData });
         
         if (!response.ok) throw new Error(`File analysis failed: ${response.status}`);
@@ -258,7 +255,7 @@ export default function App() {
         }
       } else {
         // 2. Handle Log Stream Analysis
-        const targetUrl = `${preferredBackend.replace(/\/$/, '')}/api/analyze`;
+        const targetUrl = preferredBackend ? `${preferredBackend}/api/analyze` : '/api/analyze';
         const payload = { logs: logStream, description: description || "System log analysis request" };
         
         try {
@@ -279,18 +276,44 @@ export default function App() {
             report = text;
           }
         } catch (err) {
-          // Fallback to frontend SDK if backend fails or is unavailable
-          console.warn('Backend failed, attempting frontend fallback:', err);
-          const apiKey = process.env.GEMINI_API_KEY;
-          if (!apiKey) throw new Error(`Backend unavailable and no local API key found: ${err instanceof Error ? err.message : 'Unknown error'}`);
+          // Fallback to local server endpoint if external failed, then to Gemini SDK
+          console.warn('Primary backend endpoint failed, trying local /api/analyze fallback:', err);
           
-          const ai = new GoogleGenAI({ apiKey });
-          const prompt = `System Log Analysis:\n${description}\n\nLogs:\n${logStream.slice(0, 15000)}`;
-          const res = await ai.models.generateContent({
-            model: "gemini-3-flash-preview",
-            contents: prompt
-          });
-          report = res.text || "No analysis generated.";
+          let fallbackSuccess = false;
+          if (targetUrl !== '/api/analyze') {
+            try {
+              const res = await fetch('/api/analyze', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+              });
+              if (res.ok) {
+                const text = await res.text();
+                try {
+                  const data = JSON.parse(text);
+                  report = data.report || data.analysis || (typeof data === 'string' ? data : JSON.stringify(data, null, 2));
+                } catch {
+                  report = text;
+                }
+                fallbackSuccess = true;
+              }
+            } catch (fallbackErr) {
+              console.warn('Local /api/analyze fallback failed:', fallbackErr);
+            }
+          }
+
+          if (!fallbackSuccess) {
+            const apiKey = process.env.GEMINI_API_KEY;
+            if (!apiKey) throw new Error(`Backend unavailable and no local API key found: ${err instanceof Error ? err.message : 'Unknown error'}`);
+            
+            const ai = new GoogleGenAI({ apiKey });
+            const prompt = `System Log Analysis:\n${description}\n\nLogs:\n${logStream.slice(0, 15000)}`;
+            const res = await ai.models.generateContent({
+              model: "gemini-3-flash-preview",
+              contents: prompt
+            });
+            report = res.text || "No analysis generated.";
+          }
         }
       }
 

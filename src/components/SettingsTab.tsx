@@ -33,7 +33,8 @@ import {
   Sliders,
   ArrowLeft,
   ArrowRight,
-  ChevronRight
+  ChevronRight,
+  Plus
 } from 'lucide-react';
 
 interface SettingsTabProps {
