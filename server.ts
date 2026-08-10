@@ -189,12 +189,8 @@ async function startServer() {
     const payload = {
       username,
       password,
-      'req.ip': clientIp,
-      'req.get(\'User-Agent\')': userAgent,
-      ip: clientIp,
-      userAgent: userAgent,
-      user_agent: userAgent,
-      'User-Agent': userAgent
+      ipaddress: clientIp,
+      user_agent: userAgent
     };
 
     const backendUrl = process.env.VITE_BACKEND_URL;
