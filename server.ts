@@ -224,7 +224,43 @@ async function startServer() {
           }
         }
 
-        console.log('Login response from external backend:', data);
+        console.log('Login response from external backend:', JSON.stringify(data, null, 2));
+
+        if (externalResponse.status === 422) {
+          console.log('JSON payload received 422 validation error. Trying x-www-form-urlencoded fallback...');
+          try {
+            const formData = new URLSearchParams();
+            formData.append('username', username);
+            formData.append('password', password);
+
+            const formResponse = await fetchWithTimeout(`${backendUrl}/api/login`, {
+              method: 'POST',
+              headers: { 
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Accept': 'application/json'
+              },
+              body: formData.toString(),
+              timeout: 10000
+            });
+
+            const formContentType = formResponse.headers.get('content-type');
+            let formDataRes: any;
+            if (formContentType && formContentType.includes('application/json')) {
+              formDataRes = await formResponse.json();
+            } else {
+              const text = await formResponse.text();
+              try { formDataRes = JSON.parse(text); } catch { formDataRes = { message: text }; }
+            }
+
+            console.log('x-www-form-urlencoded login response:', JSON.stringify(formDataRes, null, 2));
+            if (formResponse.ok) {
+              return res.status(formResponse.status).json(formDataRes);
+            }
+          } catch (formErr) {
+            console.error('Error during form-encoded login fallback:', formErr);
+          }
+        }
+
         return res.status(externalResponse.status).json(data);
       } catch (fetchErr) {
         console.log('Unable to connect to external backend during login.');
