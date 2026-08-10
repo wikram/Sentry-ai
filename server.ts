@@ -177,22 +177,37 @@ async function startServer() {
 
   // API Routes
   app.post('/api/login', async (req, res) => {
-    const { username, password } = req.body;
+    const username = req.body.username || req.body.email || '';
+    const password = req.body.password || '';
     if (!username || !password) {
       return res.status(400).json({ status: 'error', message: 'Username and password are required' });
     }
 
+    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || req.socket?.remoteAddress || '';
+    const userAgent = req.get('User-Agent') || (req.headers['user-agent'] as string) || '';
+
+    const payload = {
+      username,
+      password,
+      'req.ip': clientIp,
+      'req.get(\'User-Agent\')': userAgent,
+      ip: clientIp,
+      userAgent: userAgent,
+      user_agent: userAgent,
+      'User-Agent': userAgent
+    };
+
     const backendUrl = process.env.VITE_BACKEND_URL;
     if (backendUrl) {
       try {
-        console.log(`Forwarding login to external backend: ${backendUrl}/api/login`);
+        console.log(`Forwarding login to external backend: ${backendUrl}/api/login`, payload);
         const externalResponse = await fetchWithTimeout(`${backendUrl}/api/login`, {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
             'Accept': 'application/json'
           },
-          body: JSON.stringify({ username, password }),
+          body: JSON.stringify(payload),
           timeout: 10000
         });
 
