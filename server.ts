@@ -624,6 +624,7 @@ async function startServer() {
       const normalizedAgents = agents.map((a: any) => ({
         ...a,
         id: String(a.id || '').replace(/^agent-/, '').trim(),
+        status: a.status || (a.isActive === 'false' || a.isActive === false ? 'Inactive' : 'idle'),
         isActive: a.isActive === 'true' || a.isActive === true,
         isDefault: a.isDefault === 'true' || a.isDefault === true,
         findings: Array.isArray(a.findings?.finding) ? a.findings.finding : (a.findings?.finding ? [a.findings.finding] : [])

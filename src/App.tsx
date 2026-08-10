@@ -399,6 +399,7 @@ export default function App() {
 
   const fetchAndSetAgents = async () => {
     setIsFetchingAgents(true);
+
     try {
       const listagentsRes = await fetch('/api/listagents');
       if (listagentsRes.ok) {
