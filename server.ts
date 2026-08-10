@@ -1214,14 +1214,14 @@ Focus on:
 
   app.post('/api/analyze', async (req, res) => {
     try {
-      const { logs, description, model, apiKey } = req.body;
+      const { id, timestamp, logs, description, model, apiKey } = req.body;
 
       if (!logs) {
         return res.status(400).json({ error: 'No logs provided' });
       }
 
       const report = await callOpenRouterAI(logs, description, model, apiKey);
-      res.json({ report });
+      res.json({ id: id || `ANL-${Date.now()}`, timestamp: timestamp || new Date().toISOString(), report });
     } catch (error) {
       console.error('Analysis failed:', error);
       res.status(500).json({ error: 'Log analysis engine failed' });
@@ -1230,6 +1230,8 @@ Focus on:
 
   app.post('/api/analyze-file', upload.single('file'), async (req, res) => {
     try {
+      const id = req.body.id || `ANL-${Date.now()}`;
+      const timestamp = req.body.timestamp || new Date().toISOString();
       const description = req.body.description || "General analysis";
       const model = req.body.model;
       const apiKey = req.body.apiKey;
@@ -1245,7 +1247,7 @@ Focus on:
       fs.unlinkSync(file.path);
 
       const report = await callOpenRouterAI(logs, description, model, apiKey, file.originalname);
-      res.json({ report });
+      res.json({ id, timestamp, report });
     } catch (error) {
       console.error('File analysis failed:', error);
       res.status(500).json({ error: 'Log analysis engine (file mode) failed' });

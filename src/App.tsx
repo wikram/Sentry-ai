@@ -236,10 +236,14 @@ export default function App() {
 
       const activeModel = defaultAgent?.model || selectedModel || 'google/gemini-2.5-flash';
       const activeApiKey = defaultAgent?.apiKey || '';
+      const analysisId = `ANL-${Date.now()}`;
+      const analysisTimestamp = new Date().toISOString();
 
       // 1. Handle File Upload if in file mode
       if (isFileInputMode && selectedFile) {
         const formData = new FormData();
+        formData.append('id', analysisId);
+        formData.append('timestamp', analysisTimestamp);
         formData.append('file', selectedFile);
         formData.append('description', description || "Analysis request");
         if (activeModel) formData.append('model', activeModel);
@@ -261,6 +265,8 @@ export default function App() {
         // 2. Handle Log Stream Analysis
         const targetUrl = preferredBackend ? `${preferredBackend}/api/analyze` : '/api/analyze';
         const payload = { 
+          id: analysisId,
+          timestamp: analysisTimestamp,
           logs: logStream, 
           description: description || "System log analysis request",
           model: activeModel,
@@ -319,8 +325,8 @@ export default function App() {
 
       setAnalysisResult(report);
       setAnalysisHistory(prev => [{
-        id: `ANL-${Date.now()}`,
-        timestamp: new Date().toISOString(),
+        id: analysisId,
+        timestamp: analysisTimestamp,
         input: isFileInputMode ? `File: ${selectedFile?.name}` : (logStream.slice(0, 500) + '...'),
         output: report
       }, ...prev]);
