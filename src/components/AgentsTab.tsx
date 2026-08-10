@@ -158,9 +158,9 @@ export default function AgentsTab({
               <div className="flex gap-2 shrink-0">
                 <button 
                   onClick={(e) => { e.stopPropagation(); handleSetDefaultAgent(agent.id); }}
-                  className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${agent.isDefault ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                  className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${(agent.isDefault || agent.is_primary) ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
                 >
-                  {agent.isDefault ? 'Primary' : 'Set Primary'}
+                  {(agent.isDefault || agent.is_primary) ? 'Primary' : 'Set Primary'}
                 </button>
                 <button 
                   disabled={!agent.isActive || !agent.backendUrl || diagnosticsMap[agent.id]?.loading}

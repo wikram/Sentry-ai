@@ -19,6 +19,7 @@ export interface RCAAgent {
   status: 'analyzing' | 'idle' | 'complete';
   isActive: boolean;
   isDefault?: boolean;
+  is_primary?: boolean;
   backendUrl?: string;
   model?: string;
   temperature?: number;

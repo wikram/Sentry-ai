@@ -406,7 +406,19 @@ export default function App() {
         const listagentsData = await listagentsRes.json();
         const fetchedAgents = Array.isArray(listagentsData) ? listagentsData : (listagentsData?.agents || []);
         if (fetchedAgents && fetchedAgents.length > 0) {
-          setAgents(fetchedAgents);
+          const normalized = fetchedAgents.map((a: any) => {
+            const isPrim = a.isDefault === true || a.is_primary === true || String(a.isDefault) === 'true' || String(a.is_primary) === 'true';
+            return {
+              ...a,
+              isDefault: isPrim,
+              is_primary: isPrim
+            };
+          });
+          if (!normalized.some((a: any) => a.isDefault)) {
+            normalized[0].isDefault = true;
+            normalized[0].is_primary = true;
+          }
+          setAgents(normalized);
         }
       }
     } catch (err) {
