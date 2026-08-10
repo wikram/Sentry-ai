@@ -183,8 +183,8 @@ async function startServer() {
       return res.status(400).json({ status: 'error', message: 'Username and password are required' });
     }
 
-    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || req.socket?.remoteAddress || '';
-    const userAgent = req.get('User-Agent') || (req.headers['user-agent'] as string) || '';
+    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || req.socket?.remoteAddress || '127.0.0.1';
+    const userAgent = req.get('User-Agent') || (req.headers['user-agent'] as string) || 'Mozilla/5.0';
 
     const payload = {
       username,
@@ -228,6 +228,8 @@ async function startServer() {
             const formData = new URLSearchParams();
             formData.append('username', username);
             formData.append('password', password);
+            formData.append('ipaddress', clientIp);
+            formData.append('user_agent', userAgent);
 
             const formResponse = await fetchWithTimeout(`${backendUrl}/api/login`, {
               method: 'POST',
