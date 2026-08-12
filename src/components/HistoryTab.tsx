@@ -197,12 +197,21 @@ export default function HistoryTab({
               {totalRecords} records
             </span>
           </div>
-          <p className="text-sm text-slate-500 font-medium mt-0.5">
-            Historical log analysis records fetched via <code className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">/api/list-history</code>
-          </p>
         </div>
 
         <div className="flex items-center gap-2">
+          <button 
+            onClick={() => {
+              const inputEl = document.getElementById('history-search-input');
+              if (inputEl) inputEl.focus();
+            }}
+            className="px-3.5 py-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center gap-2 transition-all shadow-sm"
+            title="Focus Search"
+          >
+            <Search size={14} className="text-slate-500" />
+            Search
+          </button>
+
           <button 
             onClick={fetchHistoryFromApi}
             disabled={isLoading}
@@ -224,16 +233,27 @@ export default function HistoryTab({
 
       {/* Control Bar: Search & Page Size Options */}
       <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
-        {/* Search Bar */}
-        <div className="relative w-full sm:w-80">
-          <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input 
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search code, model, ID..."
-            className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-          />
+        {/* Search Bar & Button */}
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="relative w-full sm:w-72">
+            <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input 
+              id="history-search-input"
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') setCurrentPage(1); }}
+              placeholder="Search code, model, ID..."
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+            />
+          </div>
+          <button
+            onClick={() => setCurrentPage(1)}
+            className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition-all shadow-sm shrink-0"
+          >
+            <Search size={14} />
+            Search
+          </button>
         </div>
 
         {/* Filters & Page Size Selector */}
