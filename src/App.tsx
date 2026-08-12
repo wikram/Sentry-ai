@@ -45,7 +45,7 @@ import IncidentDetailView from './components/IncidentDetailView';
 import DashboardTab from './components/DashboardTab';
 import UserDropdownMenu from './components/UserDropdownMenu';
 import LogAnalyzerTab from './components/LogAnalyzerTab';
-import HistoryTab from './components/HistoryTab';
+import HistoryTab, { HistoryItem } from './components/HistoryTab';
 import AgentsTab from './components/AgentsTab';
 import DataSourcesTab from './components/DataSourcesTab';
 import IntegrationsTab from './components/IntegrationsTab';
@@ -60,7 +60,7 @@ export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
     return localStorage.getItem('sentry_is_authenticated') === 'true';
   });
-  const [user, setUser] = useState<{ email: string } | null>(() => {
+  const [user, setUser] = useState<{ email: string; username?: string } | null>(() => {
     const saved = localStorage.getItem('sentry_authenticated_user');
     if (saved) {
       try { return JSON.parse(saved); } catch (e) { /* ignore */ }
@@ -87,7 +87,7 @@ export default function App() {
   const [isFileInputMode, setIsFileInputMode] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<string>('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [analysisHistory, setAnalysisHistory] = useState<{ id: string, timestamp: string, input: string, output: string }[]>([]);
+  const [analysisHistory, setAnalysisHistory] = useState<HistoryItem[]>([]);
   const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
 
   const [diagnosticsMap, setDiagnosticsMap] = useState<Record<string, { status: string, timestamp?: string, loading: boolean }>>({});
@@ -238,12 +238,14 @@ export default function App() {
       const activeApiKey = defaultAgent?.apiKey || '';
       const analysisId = `ANL-${Date.now()}`;
       const analysisTimestamp = new Date().toISOString();
+      const currentUsername = user?.username || user?.email || 'admin';
 
       // 1. Handle File Upload if in file mode
       if (isFileInputMode && selectedFile) {
         const formData = new FormData();
         formData.append('id', analysisId);
         formData.append('timestamp', analysisTimestamp);
+        formData.append('user', currentUsername);
         formData.append('file', selectedFile);
         formData.append('description', description || "Analysis request");
         if (activeModel) formData.append('model', activeModel);
@@ -267,6 +269,7 @@ export default function App() {
         const payload = { 
           id: analysisId,
           timestamp: analysisTimestamp,
+          user: currentUsername,
           logs: logStream, 
           description: description || "System log analysis request",
           model: activeModel,
@@ -1803,6 +1806,11 @@ export default function App() {
                 setAnalysisHistory={setAnalysisHistory}
                 expandedHistoryId={expandedHistoryId}
                 setExpandedHistoryId={setExpandedHistoryId}
+                preferredBackendUrl={((): string => {
+                  const defaultAgent = agents.find(a => a.isDefault) || agents.find(a => a.isActive) || agents[0];
+                  const rawBackend = defaultAgent?.backendUrl || apiBackendUrl || '';
+                  return (rawBackend && (rawBackend.startsWith('http://') || rawBackend.startsWith('https://'))) ? rawBackend.replace(/\/$/, '') : '';
+                })()}
               />
             ) : activeTab === 'agents' ? (
               <AgentsTab

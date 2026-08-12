@@ -8,7 +8,7 @@ import { ShieldAlert, User, Lock, LogIn } from 'lucide-react';
 import { motion } from 'motion/react';
 
 interface LoginProps {
-  onLogin: (user: { email: string }) => void;
+  onLogin: (user: { email: string; username?: string }) => void;
 }
 
 export default function Login({ onLogin }: LoginProps) {
@@ -43,7 +43,7 @@ export default function Login({ onLogin }: LoginProps) {
       }
 
       if (response.ok && data && data.status === 'success') {
-        onLogin({ email });
+        onLogin({ email, username: email });
       } else {
         // Extract any potential error message from the response data
         let errorDetail = '';
@@ -130,7 +130,7 @@ export default function Login({ onLogin }: LoginProps) {
         </div>
 
         <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">
-          Diagnostic Control Center v3.0.1
+          Control Center v 0.0.1
         </div>
       </div>
 
@@ -168,7 +168,7 @@ export default function Login({ onLogin }: LoginProps) {
             </div>
           </div>
           <div className="space-y-2">
-            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Access Protocol</label>
+            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Password</label>
             <div className="relative">
               <Lock size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
               <input 

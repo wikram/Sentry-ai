@@ -1212,16 +1212,255 @@ Focus on:
   return content;
 }
 
+const initialAnalysisHistory: any[] = [
+  {
+    id: "019ff61e-c487-74f3-9500-5ae5af095961",
+    analysis_code: "ANL-1786540639367",
+    status: "COMPLETED",
+    input_char_count: 33,
+    engine_llm_model: "openai/gpt-4o",
+    created_at: "2026-08-12T17:17:19.355483+04:00",
+    completed_at: "2026-08-12T17:17:31.255933+04:00",
+    input: "2026-08-12 17:17:19 ERROR [AuthService] Invalid token signature",
+    output: "### Root Cause\nInvalid JWT token signature submitted by client.\n\n### Recommendation\nRotate auth keys and check client credentials."
+  },
+  {
+    id: "019ff5de-90de-754d-9793-ba1de3dde398",
+    analysis_code: "ANL-1786536431838",
+    status: "COMPLETED",
+    input_char_count: 33,
+    engine_llm_model: "openai/gpt-4o",
+    created_at: "2026-08-12T16:07:11.817793+04:00",
+    completed_at: "2026-08-12T16:07:24.645274+04:00",
+    input: "2026-08-12 16:07:11 WARN [Gateway] High response latency detected > 450ms",
+    output: "### Analysis\nUpstream database pool saturation caused minor gateway latency spikes."
+  },
+  {
+    id: "019ff55b-42a1-71e8-a320-911e0811b2ef",
+    analysis_code: "ANL-1786531120491",
+    status: "COMPLETED",
+    input_char_count: 1420,
+    engine_llm_model: "google/gemini-2.5-flash",
+    created_at: "2026-08-12T14:38:40.112000+04:00",
+    completed_at: "2026-08-12T14:38:48.330000+04:00",
+    input: "2026-08-12 14:38:40 CRITICAL [Database] Pool Exhaution: 100/100 active connections",
+    output: "### Critical Findings\nConnection leak in `user-profile-service` following v2.4.1 release."
+  },
+  {
+    id: "019ff4e2-88b9-7a3c-b102-1234a5678901",
+    analysis_code: "ANL-1786526189201",
+    status: "COMPLETED",
+    input_char_count: 8560,
+    engine_llm_model: "anthropic/claude-3-5-sonnet",
+    created_at: "2026-08-12T13:16:29.000000+04:00",
+    completed_at: "2026-08-12T13:16:41.000000+04:00",
+    input: "2026-08-12 13:16:29 ERROR [Kubelet] Pod memory usage exceeded 95% threshold",
+    output: "### Summary\nMemory leak identified in background event processor worker thread."
+  },
+  {
+    id: "019ff482-1234-5678-9abc-def012345678",
+    analysis_code: "ANL-1786522100112",
+    status: "COMPLETED",
+    input_char_count: 240,
+    engine_llm_model: "openai/gpt-4o",
+    created_at: "2026-08-12T12:05:00.000000+04:00",
+    completed_at: "2026-08-12T12:05:11.000000+04:00",
+    input: "2026-08-12 12:05:00 INFO [Deployment] Canary pod started in us-east-1",
+    output: "### Status\nCanary deployment verified with 0 errors during health check window."
+  },
+  {
+    id: "019ff410-9876-5432-1fed-cba987654321",
+    analysis_code: "ANL-1786518002334",
+    status: "COMPLETED",
+    input_char_count: 620,
+    engine_llm_model: "google/gemini-2.5-flash",
+    created_at: "2026-08-12T11:00:00.000000+04:00",
+    completed_at: "2026-08-12T11:00:08.000000+04:00",
+    input: "2026-08-12 11:00:00 WARN [RedisCache] Miss rate increased to 42%",
+    output: "### Cache Analysis\nCache eviction occurred due to unexpected peak traffic spike."
+  },
+  {
+    id: "019ff390-aaaa-bbbb-cccc-ddddeeeeffff",
+    analysis_code: "ANL-1786514000001",
+    status: "COMPLETED",
+    input_char_count: 1200,
+    engine_llm_model: "deepseek/deepseek-r1",
+    created_at: "2026-08-12T10:00:00.000000+04:00",
+    completed_at: "2026-08-12T10:00:15.000000+04:00",
+    input: "2026-08-12 10:00:00 ERROR [PaymentGateway] 504 Gateway Timeout on /v1/charge",
+    output: "### Gateway Error\nThird-party payment provider experienced momentary API downtime."
+  },
+  {
+    id: "019ff310-1111-2222-3333-444455556666",
+    analysis_code: "ANL-1786510000002",
+    status: "COMPLETED",
+    input_char_count: 450,
+    engine_llm_model: "openai/gpt-4o",
+    created_at: "2026-08-12T09:00:00.000000+04:00",
+    completed_at: "2026-08-12T09:00:10.000000+04:00",
+    input: "2026-08-12 09:00:00 INFO [CronJob] Billing sync completed successfully",
+    output: "### Report\nDaily billing sync processed 14,200 records in 18 seconds."
+  },
+  {
+    id: "019ff290-7777-8888-9999-000011112222",
+    analysis_code: "ANL-1786506000003",
+    status: "COMPLETED",
+    input_char_count: 3200,
+    engine_llm_model: "anthropic/claude-3-5-sonnet",
+    created_at: "2026-08-12T08:00:00.000000+04:00",
+    completed_at: "2026-08-12T08:00:14.000000+04:00",
+    input: "2026-08-12 08:00:00 ERROR [Nginx] 502 Bad Gateway to upstream backend",
+    output: "### Proxy Failure\nNginx upstream keepalive connection reset under peak request concurrency."
+  },
+  {
+    id: "019ff210-3333-4444-5555-666677778888",
+    analysis_code: "ANL-1786502000004",
+    status: "COMPLETED",
+    input_char_count: 980,
+    engine_llm_model: "google/gemini-2.5-flash",
+    created_at: "2026-08-12T07:00:00.000000+04:00",
+    completed_at: "2026-08-12T07:00:07.000000+04:00",
+    input: "2026-08-12 07:00:00 WARN [DNS] Resolver lookup delay: 120ms",
+    output: "### Network Report\nInternal Kube-DNS lookup latency transient spike resolved automatically."
+  },
+  {
+    id: "019ff190-9999-0000-1111-222233334444",
+    analysis_code: "ANL-1786498000005",
+    status: "COMPLETED",
+    input_char_count: 2100,
+    engine_llm_model: "openai/gpt-4o",
+    created_at: "2026-08-12T06:00:00.000000+04:00",
+    completed_at: "2026-08-12T06:00:12.000000+04:00",
+    input: "2026-08-12 06:00:00 INFO [SecurityAudit] TLS 1.3 session handshakes validated",
+    output: "### Audit Report\nAll SSL/TLS protocol configurations meet enterprise compliance policy."
+  },
+  {
+    id: "019ff110-5555-6666-7777-888899990000",
+    analysis_code: "ANL-1786494000006",
+    status: "COMPLETED",
+    input_char_count: 540,
+    engine_llm_model: "google/gemini-2.5-flash",
+    created_at: "2026-08-12T05:00:00.000000+04:00",
+    completed_at: "2026-08-12T05:00:06.000000+04:00",
+    input: "2026-08-12 05:00:00 INFO [Backup] Snapshot created for prod-db-replica-1",
+    output: "### Automated Backup\nDatabase snapshot completed. Size: 42.8 GB."
+  },
+  {
+    id: "019ff090-abcd-1234-5678-ef0123456789",
+    analysis_code: "ANL-1786490000007",
+    status: "COMPLETED",
+    input_char_count: 1850,
+    engine_llm_model: "openai/gpt-4o",
+    created_at: "2026-08-12T04:00:00.000000+04:00",
+    completed_at: "2026-08-12T04:00:11.000000+04:00",
+    input: "2026-08-12 04:00:00 ERROR [Kafka] Consumer rebalance lag > 5000 messages",
+    output: "### Queue Lag\nKafka consumer group rebalance triggered by node maintenance restart."
+  },
+  {
+    id: "019ff010-4321-8765-dcba-9876543210fe",
+    analysis_code: "ANL-1786486000008",
+    status: "COMPLETED",
+    input_char_count: 730,
+    engine_llm_model: "anthropic/claude-3-5-sonnet",
+    created_at: "2026-08-12T03:00:00.000000+04:00",
+    completed_at: "2026-08-12T03:00:09.000000+04:00",
+    input: "2026-08-12 03:00:00 WARN [DiskSpace] /var/log usage reached 82%",
+    output: "### Storage Warning\nLog rotation retention policy cleanup initiated automatically."
+  },
+  {
+    id: "019fef90-1122-3344-5566-77889900aabb",
+    analysis_code: "ANL-1786482000009",
+    status: "COMPLETED",
+    input_char_count: 1100,
+    engine_llm_model: "google/gemini-2.5-flash",
+    created_at: "2026-08-12T02:00:00.000000+04:00",
+    completed_at: "2026-08-12T02:00:05.000000+04:00",
+    input: "2026-08-12 02:00:00 INFO [Ingress] TLS certificate renewed via Let's Encrypt",
+    output: "### SSL Renewal\nCertificates successfully updated for *.cloud.sentry.internal."
+  },
+  {
+    id: "019fef10-ccdd-eeff-0011-223344556677",
+    analysis_code: "ANL-1786478000010",
+    status: "COMPLETED",
+    input_char_count: 4200,
+    engine_llm_model: "openai/gpt-4o",
+    created_at: "2026-08-12T01:00:00.000000+04:00",
+    completed_at: "2026-08-12T01:00:13.000000+04:00",
+    input: "2026-08-12 01:00:00 ERROR [IAM] Unauthorized access attempt detected from IP 198.51.100.42",
+    output: "### Security Alert\nRepeated failed SSH logins triggered automated IP block rule in firewall."
+  },
+  {
+    id: "019fee90-8899-aabb-ccdd-eeff00112233",
+    analysis_code: "ANL-1786474000011",
+    status: "COMPLETED",
+    input_char_count: 1600,
+    engine_llm_model: "google/gemini-2.5-flash",
+    created_at: "2026-08-12T00:00:00.000000+04:00",
+    completed_at: "2026-08-12T00:00:07.000000+04:00",
+    input: "2026-08-12 00:00:00 INFO [HealthCheck] All 48 microservices reporting HEALTHY",
+    output: "### Daily Health Summary\nSystem operating at 99.998% uptime for the past 24-hour cycle."
+  },
+  {
+    id: "019fee10-4455-6677-8899-aabbccddeeff",
+    analysis_code: "ANL-1786470000012",
+    status: "COMPLETED",
+    input_char_count: 290,
+    engine_llm_model: "openai/gpt-4o",
+    created_at: "2026-08-11T23:00:00.000000+04:00",
+    completed_at: "2026-08-11T23:00:06.000000+04:00",
+    input: "2026-08-11 23:00:00 INFO [Autoscaler] Scaled down deployment analytics-worker to 3 replicas",
+    output: "### Auto Scaling\nCluster resources adjusted down after off-peak traffic transition."
+  },
+  {
+    id: "019fed90-0011-2233-4455-66778899aabb",
+    analysis_code: "ANL-1786466000013",
+    status: "COMPLETED",
+    input_char_count: 1890,
+    engine_llm_model: "anthropic/claude-3-5-sonnet",
+    created_at: "2026-08-11T22:00:00.000000+04:00",
+    completed_at: "2026-08-11T22:00:12.000000+04:00",
+    input: "2026-08-11 22:00:00 ERROR [Elasticsearch] Heap memory pressure alert: 88%",
+    output: "### Search Engine Optimization\nHigh GC pause times detected on node-2. Re-sharding recommended."
+  },
+  {
+    id: "019fed10-ccdd-eeff-1122-334455667788",
+    analysis_code: "ANL-1786462000014",
+    status: "COMPLETED",
+    input_char_count: 950,
+    engine_llm_model: "google/gemini-2.5-flash",
+    created_at: "2026-08-11T21:00:00.000000+04:00",
+    completed_at: "2026-08-11T21:00:05.000000+04:00",
+    input: "2026-08-11 21:00:00 INFO [APM] Mean response time: 28ms across 1.2M requests",
+    output: "### APM Benchmark\nOptimal performance baseline observed for web application layer."
+  }
+];
+
   app.post('/api/analyze', async (req, res) => {
     try {
-      const { id, timestamp, logs, description, model, apiKey } = req.body;
+      const { id, timestamp, user, logs, description, model, apiKey } = req.body;
 
       if (!logs) {
         return res.status(400).json({ error: 'No logs provided' });
       }
 
       const report = await callOpenRouterAI(logs, description, model, apiKey);
-      res.json({ id: id || `ANL-${Date.now()}`, timestamp: timestamp || new Date().toISOString(), report });
+      
+      // Save analysis record to history
+      const newRecord = {
+        id: `019ff${Math.random().toString(16).substring(2, 10)}-${Math.random().toString(16).substring(2, 6)}-754d-9500-${Math.random().toString(16).substring(2, 12)}`,
+        analysis_code: id || `ANL-${Date.now()}`,
+        status: "COMPLETED",
+        input_char_count: logs ? logs.length : 100,
+        engine_llm_model: model || "openai/gpt-4o",
+        created_at: timestamp || new Date().toISOString(),
+        completed_at: new Date().toISOString(),
+        input: logs,
+        output: report,
+        user: user || 'admin'
+      };
+      initialAnalysisHistory.unshift(newRecord);
+
+      res.json({ id: id || `ANL-${Date.now()}`, timestamp: timestamp || new Date().toISOString(), user: user || 'admin', report });
     } catch (error) {
       console.error('Analysis failed:', error);
       res.status(500).json({ error: 'Log analysis engine failed' });
@@ -1232,6 +1471,7 @@ Focus on:
     try {
       const id = req.body.id || `ANL-${Date.now()}`;
       const timestamp = req.body.timestamp || new Date().toISOString();
+      const user = req.body.user || 'admin';
       const description = req.body.description || "General analysis";
       const model = req.body.model;
       const apiKey = req.body.apiKey;
@@ -1247,12 +1487,61 @@ Focus on:
       fs.unlinkSync(file.path);
 
       const report = await callOpenRouterAI(logs, description, model, apiKey, file.originalname);
-      res.json({ id, timestamp, report });
+      
+      // Save file analysis record to history
+      const newRecord = {
+        id: `019ff${Math.random().toString(16).substring(2, 10)}-${Math.random().toString(16).substring(2, 6)}-754d-9500-${Math.random().toString(16).substring(2, 12)}`,
+        analysis_code: id,
+        status: "COMPLETED",
+        input_char_count: logs ? logs.length : 100,
+        engine_llm_model: model || "openai/gpt-4o",
+        created_at: timestamp,
+        completed_at: new Date().toISOString(),
+        input: `File: ${file.originalname}\n\n${logs}`,
+        output: report,
+        user
+      };
+      initialAnalysisHistory.unshift(newRecord);
+
+      res.json({ id, timestamp, user, report });
     } catch (error) {
       console.error('File analysis failed:', error);
       res.status(500).json({ error: 'Log analysis engine (file mode) failed' });
     }
   });
+
+  const handleListHistory = async (req: express.Request, res: express.Response) => {
+    try {
+      const backendUrl = process.env.VITE_BACKEND_URL;
+      if (backendUrl) {
+        console.log(`Forwarding GET /api/list-history to external backend: ${backendUrl}/api/list-history`);
+        try {
+          const response = await fetchWithTimeout(`${backendUrl}/api/list-history`, {
+            headers: { 'Accept': 'application/json' },
+            timeout: 10000
+          });
+          if (response.ok) {
+            const data = await response.json();
+            return res.json(data);
+          }
+        } catch (fetchErr) {
+          console.log(`Unable to fetch /api/list-history from external backend, returning local history.`);
+        }
+      }
+
+      return res.json({
+        status: "success",
+        message: "Analysis history fetched successfully",
+        history: initialAnalysisHistory
+      });
+    } catch (error) {
+      console.error('Error fetching list history:', error);
+      res.status(500).json({ status: "error", message: "Failed to fetch analysis history", history: [] });
+    }
+  };
+
+  app.get('/api/list-history', handleListHistory);
+  app.post('/api/list-history', handleListHistory);
 
   // Vite middleware
   if (process.env.NODE_ENV !== 'production') {
