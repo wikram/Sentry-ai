@@ -17,8 +17,7 @@ import {
   ChevronLeft, 
   Cpu, 
   CheckCircle2, 
-  Loader2,
-  ListFilter
+  Loader2
 } from 'lucide-react';
 import { formatDateTime } from '../lib/dateUtils';
 
@@ -58,9 +57,8 @@ export default function HistoryTab({
   const [pageSize, setPageSize] = useState<number>(15);
   const [currentPage, setCurrentPage] = useState<number>(1);
 
-  // Search & Filter state
+  // Search state
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [statusFilter, setStatusFilter] = useState<string>('ALL');
 
   // Local expanded item state fallback
   const [localExpandedId, setLocalExpandedId] = useState<string | null>(null);
@@ -146,23 +144,60 @@ export default function HistoryTab({
   // Reset page to 1 when search or page size changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, pageSize]);
+  }, [searchQuery, pageSize]);
 
-  // Filtered history records
+  // Filtered history records with parameter search support (id, model, status, code, etc.)
   const filteredHistory = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return historyList;
+
     return historyList.filter(item => {
-      const code = (item.analysis_code || item.id || '').toLowerCase();
+      const id = (item.id || '').toLowerCase();
+      const code = (item.analysis_code || '').toLowerCase();
       const model = (item.engine_llm_model || '').toLowerCase();
       const status = (item.status || '').toLowerCase();
       const input = (item.input || '').toLowerCase();
-      const q = searchQuery.toLowerCase().trim();
+      const output = (item.output || '').toLowerCase();
+      const createdAt = (item.created_at || item.timestamp || '').toLowerCase();
 
-      const matchesSearch = !q || code.includes(q) || model.includes(q) || status.includes(q) || input.includes(q);
-      const matchesStatus = statusFilter === 'ALL' || item.status === statusFilter;
+      // Support parameter key:value syntax (e.g. "id:019", "model:gpt", "status:completed", "code:ANL")
+      if (q.includes(':')) {
+        const parts = q.split(/\s+/);
+        return parts.every(part => {
+          if (part.includes(':')) {
+            const [key, val] = part.split(':');
+            if (!val) return true;
+            if (key === 'id') return id.includes(val) || code.includes(val);
+            if (key === 'code') return code.includes(val);
+            if (key === 'model') return model.includes(val);
+            if (key === 'status') return status.includes(val);
+            if (key === 'input' || key === 'log') return input.includes(val);
+            if (key === 'output' || key === 'report') return output.includes(val);
+          }
+          return (
+            id.includes(part) ||
+            code.includes(part) ||
+            model.includes(part) ||
+            status.includes(part) ||
+            input.includes(part) ||
+            output.includes(part) ||
+            createdAt.includes(part)
+          );
+        });
+      }
 
-      return matchesSearch && matchesStatus;
+      // Standard multi-field search across ID, Analysis Code, LLM Model, Status, Input & Output
+      return (
+        id.includes(q) ||
+        code.includes(q) ||
+        model.includes(q) ||
+        status.includes(q) ||
+        input.includes(q) ||
+        output.includes(q) ||
+        createdAt.includes(q)
+      );
     });
-  }, [historyList, searchQuery, statusFilter]);
+  }, [historyList, searchQuery]);
 
   // Pagination calculation
   const totalRecords = filteredHistory.length;
@@ -232,10 +267,10 @@ export default function HistoryTab({
       </div>
 
       {/* Control Bar: Search & Page Size Options */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
-        {/* Search Bar & Button */}
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <div className="relative w-full sm:w-72">
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        {/* Search Bar, Tags & Button */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full md:w-auto flex-1 max-w-2xl">
+          <div className="relative flex-1">
             <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input 
               id="history-search-input"
@@ -243,38 +278,40 @@ export default function HistoryTab({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') setCurrentPage(1); }}
-              placeholder="Search code, model, ID..."
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+              placeholder="Search by ID, model, status, code... (e.g., status:COMPLETED or id:ANL)"
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
             />
           </div>
           <button
             onClick={() => setCurrentPage(1)}
-            className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition-all shadow-sm shrink-0"
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all shadow-sm shrink-0"
           >
             <Search size={14} />
             Search
           </button>
         </div>
 
-        {/* Filters & Page Size Selector */}
-        <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-end">
-          {/* Status Filter */}
-          <div className="flex items-center gap-2">
-            <ListFilter size={14} className="text-slate-400 shrink-0" />
-            <select 
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="bg-slate-50 border border-slate-200 text-slate-700 text-xs font-bold rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-            >
-              <option value="ALL">All Statuses</option>
-              <option value="COMPLETED">COMPLETED</option>
-              <option value="RUNNING">RUNNING</option>
-              <option value="FAILED">FAILED</option>
-            </select>
+        {/* Quick Parameter Filter Tags & Page Size Selector */}
+        <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 pt-3 md:pt-0 border-slate-100">
+          <div className="hidden lg:flex items-center gap-1.5 text-[11px] text-slate-400 font-medium">
+            <span className="text-slate-400 font-semibold mr-0.5">Parameters:</span>
+            {['id:', 'model:', 'status:', 'code:'].map(param => (
+              <button
+                key={param}
+                onClick={() => {
+                  setSearchQuery(prev => prev ? `${prev.trim()} ${param}` : param);
+                  const el = document.getElementById('history-search-input');
+                  if (el) el.focus();
+                }}
+                className="px-2 py-0.5 bg-slate-100 hover:bg-blue-50 hover:text-blue-600 text-slate-600 rounded-lg font-mono text-[10px] font-bold transition-all border border-slate-200/80"
+              >
+                +{param}
+              </button>
+            ))}
           </div>
 
           {/* Display Choice: 10 / 15 / 20 results per page */}
-          <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
+          <div className="flex items-center gap-2">
             <span className="text-xs font-semibold text-slate-500 whitespace-nowrap">Display:</span>
             <div className="inline-flex bg-slate-100 p-1 rounded-xl gap-1">
               {[10, 15, 20].map((size) => (
