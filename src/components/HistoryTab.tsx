@@ -17,7 +17,10 @@ import {
   ChevronLeft, 
   Cpu, 
   CheckCircle2, 
-  Loader2
+  Loader2,
+  SlidersHorizontal,
+  X,
+  Filter
 } from 'lucide-react';
 import { formatDateTime } from '../lib/dateUtils';
 
@@ -57,8 +60,12 @@ export default function HistoryTab({
   const [pageSize, setPageSize] = useState<number>(15);
   const [currentPage, setCurrentPage] = useState<number>(1);
 
-  // Search state
+  // Search & Filter state
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [searchScope, setSearchScope] = useState<'ALL' | 'ID' | 'MODEL' | 'STATUS' | 'LOGS'>('ALL');
+  const [selectedStatus, setSelectedStatus] = useState<string>('ALL');
+  const [selectedModel, setSelectedModel] = useState<string>('ALL');
+  const [showFilterPanel, setShowFilterPanel] = useState<boolean>(false);
 
   // Local expanded item state fallback
   const [localExpandedId, setLocalExpandedId] = useState<string | null>(null);
@@ -141,16 +148,13 @@ export default function HistoryTab({
     fetchHistoryFromApi();
   }, [preferredBackendUrl]);
 
-  // Reset page to 1 when search or page size changes
+  // Reset page to 1 when search or filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, pageSize]);
+  }, [searchQuery, searchScope, selectedStatus, selectedModel, pageSize]);
 
-  // Filtered history records with parameter search support (id, model, status, code, etc.)
+  // Filtered history records using parameter scope and discrete filter options
   const filteredHistory = useMemo(() => {
-    const q = searchQuery.toLowerCase().trim();
-    if (!q) return historyList;
-
     return historyList.filter(item => {
       const id = (item.id || '').toLowerCase();
       const code = (item.analysis_code || '').toLowerCase();
@@ -160,7 +164,21 @@ export default function HistoryTab({
       const output = (item.output || '').toLowerCase();
       const createdAt = (item.created_at || item.timestamp || '').toLowerCase();
 
-      // Support parameter key:value syntax (e.g. "id:019", "model:gpt", "status:completed", "code:ANL")
+      // 1. Status Filter
+      if (selectedStatus !== 'ALL' && item.status !== selectedStatus) {
+        return false;
+      }
+
+      // 2. Model Filter
+      if (selectedModel !== 'ALL' && !model.includes(selectedModel.toLowerCase())) {
+        return false;
+      }
+
+      // 3. Search Query with Parameter Scope
+      const q = searchQuery.toLowerCase().trim();
+      if (!q) return true;
+
+      // Handle key:val syntax silently if user types it
       if (q.includes(':')) {
         const parts = q.split(/\s+/);
         return parts.every(part => {
@@ -186,7 +204,13 @@ export default function HistoryTab({
         });
       }
 
-      // Standard multi-field search across ID, Analysis Code, LLM Model, Status, Input & Output
+      // Search by selected parameter scope
+      if (searchScope === 'ID') return id.includes(q) || code.includes(q);
+      if (searchScope === 'MODEL') return model.includes(q);
+      if (searchScope === 'STATUS') return status.includes(q);
+      if (searchScope === 'LOGS') return input.includes(q) || output.includes(q);
+
+      // Search all fields
       return (
         id.includes(q) ||
         code.includes(q) ||
@@ -197,7 +221,10 @@ export default function HistoryTab({
         createdAt.includes(q)
       );
     });
-  }, [historyList, searchQuery]);
+  }, [historyList, searchQuery, searchScope, selectedStatus, selectedModel]);
+
+  // Check if any non-default filter is currently active
+  const hasActiveFilters = searchScope !== 'ALL' || selectedStatus !== 'ALL' || selectedModel !== 'ALL' || searchQuery !== '';
 
   // Pagination calculation
   const totalRecords = filteredHistory.length;
@@ -224,94 +251,82 @@ export default function HistoryTab({
       className="w-[90%] mx-auto space-y-6 pb-12"
     >
       {/* Top Header Section */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <h2 className="text-2xl font-bold tracking-tight text-slate-900">Analysis History</h2>
-            <span className="px-2.5 py-1 bg-slate-100 text-slate-600 rounded-full text-xs font-bold font-mono">
-              {totalRecords} records
-            </span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button 
-            onClick={() => {
-              const inputEl = document.getElementById('history-search-input');
-              if (inputEl) inputEl.focus();
-            }}
-            className="px-3.5 py-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center gap-2 transition-all shadow-sm"
-            title="Focus Search"
-          >
-            <Search size={14} className="text-slate-500" />
-            Search
-          </button>
-
-          <button 
-            onClick={fetchHistoryFromApi}
-            disabled={isLoading}
-            className="px-3.5 py-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center gap-2 transition-all shadow-sm disabled:opacity-50"
-            title="Refresh history from API"
-          >
-            <RefreshCw size={14} className={isLoading ? "animate-spin text-blue-600" : "text-slate-500"} />
-            Refresh
-          </button>
-
-          <button 
-            onClick={handleClear}
-            className="px-3.5 py-2 border border-slate-200 text-slate-400 hover:text-red-500 hover:border-red-200 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center gap-2 transition-all"
-          >
-            <Trash2 size={14} /> Clear
-          </button>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <h2 className="text-2xl font-bold tracking-tight text-slate-900">Analysis History</h2>
+          <span className="px-2.5 py-1 bg-slate-100 text-slate-600 rounded-full text-xs font-bold font-mono">
+            {totalRecords} records
+          </span>
         </div>
       </div>
 
-      {/* Control Bar: Search & Page Size Options */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        {/* Search Bar, Tags & Button */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full md:w-auto flex-1 max-w-2xl">
-          <div className="relative flex-1">
-            <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input 
-              id="history-search-input"
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') setCurrentPage(1); }}
-              placeholder="Search by ID, model, status, code... (e.g., status:COMPLETED or id:ANL)"
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
-            />
-          </div>
-          <button
-            onClick={() => setCurrentPage(1)}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all shadow-sm shrink-0"
-          >
-            <Search size={14} />
-            Search
-          </button>
-        </div>
+      {/* Control Bar: Smart Parameter Search & Page Size Options */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-3">
+        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+          {/* Smart Search Bar with Scope Selector */}
+          <div className="flex items-center gap-2 w-full flex-1">
+            {/* Parameter Scope Dropdown */}
+            <select
+              value={searchScope}
+              onChange={(e) => setSearchScope(e.target.value as any)}
+              className="bg-slate-100 border border-slate-200 text-slate-700 font-bold text-xs rounded-xl px-3 py-2 cursor-pointer hover:bg-slate-200/60 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500/20 shrink-0"
+              title="Select parameter scope to search"
+            >
+              <option value="ALL">All Parameters</option>
+              <option value="ID">ID / Code</option>
+              <option value="MODEL">LLM Model</option>
+              <option value="STATUS">Status</option>
+              <option value="LOGS">Log Content</option>
+            </select>
 
-        {/* Quick Parameter Filter Tags & Page Size Selector */}
-        <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end border-t md:border-t-0 pt-3 md:pt-0 border-slate-100">
-          <div className="hidden lg:flex items-center gap-1.5 text-[11px] text-slate-400 font-medium">
-            <span className="text-slate-400 font-semibold mr-0.5">Parameters:</span>
-            {['id:', 'model:', 'status:', 'code:'].map(param => (
-              <button
-                key={param}
-                onClick={() => {
-                  setSearchQuery(prev => prev ? `${prev.trim()} ${param}` : param);
-                  const el = document.getElementById('history-search-input');
-                  if (el) el.focus();
-                }}
-                className="px-2 py-0.5 bg-slate-100 hover:bg-blue-50 hover:text-blue-600 text-slate-600 rounded-lg font-mono text-[10px] font-bold transition-all border border-slate-200/80"
-              >
-                +{param}
-              </button>
-            ))}
+            {/* Clean Search Input */}
+            <div className="relative flex-1">
+              <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input 
+                id="history-search-input"
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={
+                  searchScope === 'ID' ? 'Search by ID or code...' :
+                  searchScope === 'MODEL' ? 'Search by model name...' :
+                  searchScope === 'STATUS' ? 'Search by status...' :
+                  searchScope === 'LOGS' ? 'Search inside log content...' :
+                  'Search history records...'
+                }
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-8 py-2 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 rounded-full transition-colors"
+                  title="Clear search"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+
+            {/* Smart Filters Button */}
+            <button
+              onClick={() => setShowFilterPanel(!showFilterPanel)}
+              className={`px-3.5 py-2 border rounded-xl text-xs font-bold flex items-center gap-2 transition-all shrink-0 ${
+                showFilterPanel || (selectedStatus !== 'ALL' || selectedModel !== 'ALL')
+                  ? 'bg-blue-50 border-blue-200 text-blue-600'
+                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+              }`}
+              title="Toggle smart parameter filter panel"
+            >
+              <SlidersHorizontal size={14} />
+              <span className="hidden sm:inline">Smart Filters</span>
+              {(selectedStatus !== 'ALL' || selectedModel !== 'ALL') && (
+                <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse" />
+              )}
+            </button>
           </div>
 
-          {/* Display Choice: 10 / 15 / 20 results per page */}
-          <div className="flex items-center gap-2">
+          {/* Page Size Selector */}
+          <div className="flex items-center gap-2 justify-end shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-slate-100">
             <span className="text-xs font-semibold text-slate-500 whitespace-nowrap">Display:</span>
             <div className="inline-flex bg-slate-100 p-1 rounded-xl gap-1">
               {[10, 15, 20].map((size) => (
@@ -331,6 +346,112 @@ export default function HistoryTab({
             <span className="text-xs text-slate-400 font-medium">/ page</span>
           </div>
         </div>
+
+        {/* Expandable Smart Parameter Filter Panel */}
+        <AnimatePresence>
+          {showFilterPanel && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="overflow-hidden pt-3 border-t border-slate-100"
+            >
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 pb-1">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">Status Parameter</label>
+                  <div className="flex flex-wrap gap-1">
+                    {['ALL', 'COMPLETED', 'RUNNING', 'FAILED'].map(st => (
+                      <button
+                        key={st}
+                        onClick={() => setSelectedStatus(st)}
+                        className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all ${
+                          selectedStatus === st
+                            ? 'bg-slate-900 text-white shadow-sm'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200/70'
+                        }`}
+                      >
+                        {st}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">Engine Model Parameter</label>
+                  <select
+                    value={selectedModel}
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 text-slate-700 text-xs font-bold rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  >
+                    <option value="ALL">All Engine Models</option>
+                    <option value="gpt-4o">OpenAI GPT-4o</option>
+                    <option value="gemini">Google Gemini</option>
+                    <option value="claude">Anthropic Claude</option>
+                    <option value="deepseek">DeepSeek R1</option>
+                  </select>
+                </div>
+
+                <div className="flex items-end justify-end">
+                  {hasActiveFilters && (
+                    <button
+                      onClick={() => {
+                        setSelectedStatus('ALL');
+                        setSelectedModel('ALL');
+                        setSearchScope('ALL');
+                        setSearchQuery('');
+                      }}
+                      className="text-xs font-bold text-rose-600 hover:text-rose-700 hover:underline flex items-center gap-1 py-1"
+                    >
+                      Reset All Filters
+                    </button>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Active Filter Badges */}
+        {hasActiveFilters && !showFilterPanel && (
+          <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-100 text-xs">
+            <span className="text-slate-400 font-semibold text-[11px]">Active Filters:</span>
+            {searchScope !== 'ALL' && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-[11px] font-bold">
+                Scope: {searchScope}
+                <button onClick={() => setSearchScope('ALL')} className="hover:text-blue-900"><X size={12} /></button>
+              </span>
+            )}
+            {selectedStatus !== 'ALL' && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-[11px] font-bold">
+                Status: {selectedStatus}
+                <button onClick={() => setSelectedStatus('ALL')} className="hover:text-blue-900"><X size={12} /></button>
+              </span>
+            )}
+            {selectedModel !== 'ALL' && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-[11px] font-bold">
+                Model: {selectedModel}
+                <button onClick={() => setSelectedModel('ALL')} className="hover:text-blue-900"><X size={12} /></button>
+              </span>
+            )}
+            {searchQuery && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-[11px] font-bold">
+                "{searchQuery}"
+                <button onClick={() => setSearchQuery('')} className="hover:text-slate-900"><X size={12} /></button>
+              </span>
+            )}
+            <button
+              onClick={() => {
+                setSelectedStatus('ALL');
+                setSelectedModel('ALL');
+                setSearchScope('ALL');
+                setSearchQuery('');
+              }}
+              className="text-[11px] font-bold text-slate-400 hover:text-rose-600 ml-1 underline"
+            >
+              Clear All
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Main List & Loading States */}
