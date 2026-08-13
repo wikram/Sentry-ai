@@ -7,18 +7,15 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import { 
-  Trash2, 
   History, 
   Terminal, 
   Clock, 
   ChevronRight, 
-  RefreshCw, 
   Search, 
   ChevronLeft, 
   Cpu, 
   CheckCircle2, 
   Loader2,
-  SlidersHorizontal,
   X,
   Filter
 } from 'lucide-react';
@@ -35,6 +32,13 @@ export interface HistoryItem {
   timestamp?: string;
   input?: string;
   output?: string;
+}
+
+export interface FilterChip {
+  id: string;
+  key: 'id' | 'model' | 'status' | 'logs' | 'search';
+  label: string;
+  value: string;
 }
 
 interface HistoryTabProps {
@@ -60,12 +64,27 @@ export default function HistoryTab({
   const [pageSize, setPageSize] = useState<number>(15);
   const [currentPage, setCurrentPage] = useState<number>(1);
 
-  // Search & Filter state
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [searchScope, setSearchScope] = useState<'ALL' | 'ID' | 'MODEL' | 'STATUS' | 'LOGS'>('ALL');
-  const [selectedStatus, setSelectedStatus] = useState<string>('ALL');
-  const [selectedModel, setSelectedModel] = useState<string>('ALL');
-  const [showFilterPanel, setShowFilterPanel] = useState<boolean>(false);
+  // GCP-Style Filter Bar State
+  const [activeChips, setActiveChips] = useState<FilterChip[]>([]);
+  const [currentInputValue, setCurrentInputValue] = useState<string>('');
+  const [selectedPendingKey, setSelectedPendingKey] = useState<'id' | 'model' | 'status' | 'logs' | null>(null);
+  const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
+  const [hoveredParam, setHoveredParam] = useState<'id' | 'model' | 'status' | 'logs' | null>(null);
+
+  const filterContainerRef = React.useRef<HTMLDivElement>(null);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (filterContainerRef.current && !filterContainerRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+        setHoveredParam(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Local expanded item state fallback
   const [localExpandedId, setLocalExpandedId] = useState<string | null>(null);
@@ -151,9 +170,58 @@ export default function HistoryTab({
   // Reset page to 1 when search or filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, searchScope, selectedStatus, selectedModel, pageSize]);
+  }, [activeChips, currentInputValue, selectedPendingKey, pageSize]);
 
-  // Filtered history records using parameter scope and discrete filter options
+  // Add a filter chip
+  const addChip = (key: 'id' | 'model' | 'status' | 'logs' | 'search', label: string, value: string) => {
+    const trimmedVal = value.trim();
+    if (!trimmedVal) return;
+
+    // Avoid duplicate identical chips
+    const exists = activeChips.some(c => c.key === key && c.value.toLowerCase() === trimmedVal.toLowerCase());
+    if (!exists) {
+      setActiveChips(prev => [...prev, {
+        id: `${key}-${trimmedVal}-${Date.now()}`,
+        key,
+        label,
+        value: trimmedVal
+      }]);
+    }
+
+    setCurrentInputValue('');
+    setSelectedPendingKey(null);
+    setIsDropdownOpen(false);
+    setHoveredParam(null);
+  };
+
+  // Remove a filter chip
+  const removeChip = (chipId: string) => {
+    setActiveChips(prev => prev.filter(c => c.id !== chipId));
+  };
+
+  // Handle Enter / Backspace keys in filter input
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (currentInputValue.trim()) {
+        const key = selectedPendingKey || 'search';
+        const label = 
+          key === 'id' ? 'ID' :
+          key === 'model' ? 'Model' :
+          key === 'status' ? 'Status' :
+          key === 'logs' ? 'Logs' : 'Search';
+        addChip(key, label, currentInputValue);
+      }
+    } else if (e.key === 'Backspace' && currentInputValue === '') {
+      if (selectedPendingKey) {
+        setSelectedPendingKey(null);
+      } else if (activeChips.length > 0) {
+        setActiveChips(prev => prev.slice(0, -1));
+      }
+    }
+  };
+
+  // Filtered history records matching ALL active chips + pending input
   const filteredHistory = useMemo(() => {
     return historyList.filter(item => {
       const id = (item.id || '').toLowerCase();
@@ -164,67 +232,62 @@ export default function HistoryTab({
       const output = (item.output || '').toLowerCase();
       const createdAt = (item.created_at || item.timestamp || '').toLowerCase();
 
-      // 1. Status Filter
-      if (selectedStatus !== 'ALL' && item.status !== selectedStatus) {
-        return false;
+      // Must match ALL active chips (AND logic)
+      for (const chip of activeChips) {
+        const val = chip.value.toLowerCase().trim();
+        if (!val) continue;
+
+        if (chip.key === 'status') {
+          if (status !== val) return false;
+        } else if (chip.key === 'model') {
+          if (!model.includes(val)) return false;
+        } else if (chip.key === 'id') {
+          if (!id.includes(val) && !code.includes(val)) return false;
+        } else if (chip.key === 'logs') {
+          if (!input.includes(val) && !output.includes(val)) return false;
+        } else if (chip.key === 'search') {
+          const matchesAny =
+            id.includes(val) ||
+            code.includes(val) ||
+            model.includes(val) ||
+            status.includes(val) ||
+            input.includes(val) ||
+            output.includes(val) ||
+            createdAt.includes(val);
+          if (!matchesAny) return false;
+        }
       }
 
-      // 2. Model Filter
-      if (selectedModel !== 'ALL' && !model.includes(selectedModel.toLowerCase())) {
-        return false;
+      // Also filter by active typing in input field
+      const pendingVal = currentInputValue.toLowerCase().trim();
+      if (pendingVal) {
+        if (selectedPendingKey === 'status') {
+          if (!status.includes(pendingVal)) return false;
+        } else if (selectedPendingKey === 'model') {
+          if (!model.includes(pendingVal)) return false;
+        } else if (selectedPendingKey === 'id') {
+          if (!id.includes(pendingVal) && !code.includes(pendingVal)) return false;
+        } else if (selectedPendingKey === 'logs') {
+          if (!input.includes(pendingVal) && !output.includes(pendingVal)) return false;
+        } else {
+          const matchesAny =
+            id.includes(pendingVal) ||
+            code.includes(pendingVal) ||
+            model.includes(pendingVal) ||
+            status.includes(pendingVal) ||
+            input.includes(pendingVal) ||
+            output.includes(pendingVal) ||
+            createdAt.includes(pendingVal);
+          if (!matchesAny) return false;
+        }
       }
 
-      // 3. Search Query with Parameter Scope
-      const q = searchQuery.toLowerCase().trim();
-      if (!q) return true;
-
-      // Handle key:val syntax silently if user types it
-      if (q.includes(':')) {
-        const parts = q.split(/\s+/);
-        return parts.every(part => {
-          if (part.includes(':')) {
-            const [key, val] = part.split(':');
-            if (!val) return true;
-            if (key === 'id') return id.includes(val) || code.includes(val);
-            if (key === 'code') return code.includes(val);
-            if (key === 'model') return model.includes(val);
-            if (key === 'status') return status.includes(val);
-            if (key === 'input' || key === 'log') return input.includes(val);
-            if (key === 'output' || key === 'report') return output.includes(val);
-          }
-          return (
-            id.includes(part) ||
-            code.includes(part) ||
-            model.includes(part) ||
-            status.includes(part) ||
-            input.includes(part) ||
-            output.includes(part) ||
-            createdAt.includes(part)
-          );
-        });
-      }
-
-      // Search by selected parameter scope
-      if (searchScope === 'ID') return id.includes(q) || code.includes(q);
-      if (searchScope === 'MODEL') return model.includes(q);
-      if (searchScope === 'STATUS') return status.includes(q);
-      if (searchScope === 'LOGS') return input.includes(q) || output.includes(q);
-
-      // Search all fields
-      return (
-        id.includes(q) ||
-        code.includes(q) ||
-        model.includes(q) ||
-        status.includes(q) ||
-        input.includes(q) ||
-        output.includes(q) ||
-        createdAt.includes(q)
-      );
+      return true;
     });
-  }, [historyList, searchQuery, searchScope, selectedStatus, selectedModel]);
+  }, [historyList, activeChips, currentInputValue, selectedPendingKey]);
 
-  // Check if any non-default filter is currently active
-  const hasActiveFilters = searchScope !== 'ALL' || selectedStatus !== 'ALL' || selectedModel !== 'ALL' || searchQuery !== '';
+  // Check if any filters exist
+  const hasActiveFilters = activeChips.length > 0 || currentInputValue !== '' || selectedPendingKey !== null;
 
   // Pagination calculation
   const totalRecords = filteredHistory.length;
@@ -260,198 +323,253 @@ export default function HistoryTab({
         </div>
       </div>
 
-      {/* Control Bar: Smart Parameter Search & Page Size Options */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-3">
-        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
-          {/* Smart Search Bar with Scope Selector */}
-          <div className="flex items-center gap-2 w-full flex-1">
-            {/* Parameter Scope Dropdown */}
-            <select
-              value={searchScope}
-              onChange={(e) => setSearchScope(e.target.value as any)}
-              className="bg-slate-100 border border-slate-200 text-slate-700 font-bold text-xs rounded-xl px-3 py-2 cursor-pointer hover:bg-slate-200/60 transition-all focus:outline-none focus:ring-2 focus:ring-blue-500/20 shrink-0"
-              title="Select parameter scope to search"
-            >
-              <option value="ALL">All Parameters</option>
-              <option value="ID">ID / Code</option>
-              <option value="MODEL">LLM Model</option>
-              <option value="STATUS">Status</option>
-              <option value="LOGS">Log Content</option>
-            </select>
+      {/* Control Bar: GCP Console Style Composite Parameter Search Bar */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+        {/* GCP Filter Bar Container */}
+        <div ref={filterContainerRef} className="relative flex-1">
+          <div 
+            onClick={() => {
+              setIsDropdownOpen(true);
+              if (inputRef.current) inputRef.current.focus();
+            }}
+            className={`min-h-[44px] bg-slate-50 border rounded-xl px-3.5 py-1.5 flex flex-wrap items-center gap-2 cursor-text transition-all ${
+              isDropdownOpen ? 'border-blue-500 ring-2 ring-blue-500/20 bg-white' : 'border-slate-200 hover:border-slate-300'
+            }`}
+          >
+            <Search size={16} className="text-slate-400 shrink-0 mr-0.5" />
 
-            {/* Clean Search Input */}
-            <div className="relative flex-1">
-              <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input 
-                id="history-search-input"
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={
-                  searchScope === 'ID' ? 'Search by ID or code...' :
-                  searchScope === 'MODEL' ? 'Search by model name...' :
-                  searchScope === 'STATUS' ? 'Search by status...' :
-                  searchScope === 'LOGS' ? 'Search inside log content...' :
-                  'Search history records...'
-                }
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-8 py-2 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 rounded-full transition-colors"
-                  title="Clear search"
+            {/* Active Filter Chips */}
+            <AnimatePresence>
+              {activeChips.map((chip) => (
+                <motion.span
+                  key={chip.id}
+                  initial={{ scale: 0.85, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.85, opacity: 0 }}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-900 text-slate-100 rounded-lg text-xs font-semibold shadow-xs shrink-0"
                 >
-                  <X size={14} />
-                </button>
-              )}
-            </div>
-
-            {/* Smart Filters Button */}
-            <button
-              onClick={() => setShowFilterPanel(!showFilterPanel)}
-              className={`px-3.5 py-2 border rounded-xl text-xs font-bold flex items-center gap-2 transition-all shrink-0 ${
-                showFilterPanel || (selectedStatus !== 'ALL' || selectedModel !== 'ALL')
-                  ? 'bg-blue-50 border-blue-200 text-blue-600'
-                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-              }`}
-              title="Toggle smart parameter filter panel"
-            >
-              <SlidersHorizontal size={14} />
-              <span className="hidden sm:inline">Smart Filters</span>
-              {(selectedStatus !== 'ALL' || selectedModel !== 'ALL') && (
-                <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse" />
-              )}
-            </button>
-          </div>
-
-          {/* Page Size Selector */}
-          <div className="flex items-center gap-2 justify-end shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-slate-100">
-            <span className="text-xs font-semibold text-slate-500 whitespace-nowrap">Display:</span>
-            <div className="inline-flex bg-slate-100 p-1 rounded-xl gap-1">
-              {[10, 15, 20].map((size) => (
-                <button
-                  key={size}
-                  onClick={() => setPageSize(size)}
-                  className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all ${
-                    pageSize === size 
-                      ? 'bg-blue-600 text-white shadow-sm' 
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
-                  }`}
-                >
-                  {size}
-                </button>
+                  <span className="text-slate-400 font-mono text-[10px] font-bold uppercase">{chip.label}:</span>
+                  <span className="font-bold">{chip.value}</span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeChip(chip.id);
+                    }}
+                    className="hover:bg-slate-700 p-0.5 rounded transition-colors text-slate-400 hover:text-white ml-0.5"
+                    title="Remove filter parameter"
+                  >
+                    <X size={12} />
+                  </button>
+                </motion.span>
               ))}
-            </div>
-            <span className="text-xs text-slate-400 font-medium">/ page</span>
-          </div>
-        </div>
+            </AnimatePresence>
 
-        {/* Expandable Smart Parameter Filter Panel */}
-        <AnimatePresence>
-          {showFilterPanel && (
-            <motion.div
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              className="overflow-hidden pt-3 border-t border-slate-100"
-            >
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 pb-1">
-                <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">Status Parameter</label>
-                  <div className="flex flex-wrap gap-1">
-                    {['ALL', 'COMPLETED', 'RUNNING', 'FAILED'].map(st => (
-                      <button
-                        key={st}
-                        onClick={() => setSelectedStatus(st)}
-                        className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all ${
-                          selectedStatus === st
-                            ? 'bg-slate-900 text-white shadow-sm'
-                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200/70'
-                        }`}
-                      >
-                        {st}
-                      </button>
-                    ))}
+            {/* Active Pending Parameter Prefix */}
+            {selectedPendingKey && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-100 text-blue-800 rounded-lg text-xs font-bold font-mono shrink-0 border border-blue-200">
+                {selectedPendingKey === 'id' ? 'ID' :
+                 selectedPendingKey === 'model' ? 'Model' :
+                 selectedPendingKey === 'status' ? 'Status' : 'Logs'}:
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedPendingKey(null);
+                  }}
+                  className="hover:text-blue-950 p-0.5 ml-0.5"
+                >
+                  <X size={10} />
+                </button>
+              </span>
+            )}
+
+            {/* Input Field */}
+            <input
+              ref={inputRef}
+              type="text"
+              value={currentInputValue}
+              onChange={(e) => setCurrentInputValue(e.target.value)}
+              onFocus={() => setIsDropdownOpen(true)}
+              onKeyDown={handleKeyDown}
+              placeholder={
+                activeChips.length > 0 || selectedPendingKey
+                  ? selectedPendingKey
+                    ? `Enter ${selectedPendingKey} value and press Enter...`
+                    : 'Filter by another parameter...'
+                  : 'Filter history by parameters (e.g. ID, Model, Status)...'
+              }
+              className="flex-1 bg-transparent border-none text-xs font-medium focus:outline-none min-w-[150px] py-1 text-slate-800 placeholder:text-slate-400"
+            />
+
+            {/* Clear All Button */}
+            {hasActiveFilters && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setActiveChips([]);
+                  setCurrentInputValue('');
+                  setSelectedPendingKey(null);
+                }}
+                className="text-xs font-bold text-slate-400 hover:text-rose-600 px-2 py-1 rounded transition-colors shrink-0 ml-auto"
+                title="Clear all filters"
+              >
+                Clear all
+              </button>
+            )}
+          </div>
+
+          {/* GCP-Style Parameter Dropdown Menu */}
+          <AnimatePresence>
+            {isDropdownOpen && (
+              <motion.div
+                initial={{ opacity: 0, y: 6, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 6, scale: 0.98 }}
+                transition={{ duration: 0.15 }}
+                className="absolute left-0 top-full mt-1.5 w-full sm:w-80 bg-white border border-slate-200 rounded-2xl shadow-xl z-30 p-2 overflow-hidden"
+              >
+                <div className="px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 border-b border-slate-100 mb-1 flex items-center justify-between">
+                  <span>Filter by Property</span>
+                  <Filter size={12} className="text-slate-400" />
+                </div>
+
+                <div className="space-y-0.5">
+                  {/* Parameter: ID / Code */}
+                  <div
+                    onClick={() => {
+                      setSelectedPendingKey('id');
+                      setIsDropdownOpen(false);
+                      if (inputRef.current) inputRef.current.focus();
+                    }}
+                    className="flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 cursor-pointer transition-colors group"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Terminal size={14} className="text-slate-400 group-hover:text-blue-600" />
+                      <span>ID / Analysis Code</span>
+                    </div>
+                    <span className="text-[10px] font-mono text-slate-400">Type value &crarr;</span>
+                  </div>
+
+                  {/* Parameter: Status */}
+                  <div 
+                    onMouseEnter={() => setHoveredParam('status')}
+                    className="relative"
+                  >
+                    <div
+                      onClick={() => setHoveredParam(hoveredParam === 'status' ? null : 'status')}
+                      className="flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 cursor-pointer transition-colors group"
+                    >
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 size={14} className="text-slate-400 group-hover:text-blue-600" />
+                        <span>Status</span>
+                      </div>
+                      <ChevronRight size={14} className="text-slate-400 group-hover:text-blue-600" />
+                    </div>
+
+                    {/* Status Submenu Options */}
+                    {hoveredParam === 'status' && (
+                      <div className="ml-4 pl-3 border-l-2 border-blue-100 my-1 space-y-1">
+                        {['COMPLETED', 'RUNNING', 'FAILED'].map(st => (
+                          <div
+                            key={st}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              addChip('status', 'Status', st);
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-100 hover:text-slate-900 cursor-pointer transition-all flex items-center gap-2"
+                          >
+                            <span className={`w-2 h-2 rounded-full ${
+                              st === 'COMPLETED' ? 'bg-emerald-500' :
+                              st === 'RUNNING' ? 'bg-blue-500' : 'bg-rose-500'
+                            }`} />
+                            {st}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Parameter: Engine Model */}
+                  <div 
+                    onMouseEnter={() => setHoveredParam('model')}
+                    className="relative"
+                  >
+                    <div
+                      onClick={() => setHoveredParam(hoveredParam === 'model' ? null : 'model')}
+                      className="flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 cursor-pointer transition-colors group"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Cpu size={14} className="text-slate-400 group-hover:text-blue-600" />
+                        <span>LLM Engine Model</span>
+                      </div>
+                      <ChevronRight size={14} className="text-slate-400 group-hover:text-blue-600" />
+                    </div>
+
+                    {/* Model Submenu Options */}
+                    {hoveredParam === 'model' && (
+                      <div className="ml-4 pl-3 border-l-2 border-blue-100 my-1 space-y-1">
+                        {[
+                          { label: 'OpenAI GPT-4o', value: 'openai/gpt-4o' },
+                          { label: 'Google Gemini', value: 'google/gemini-1.5' },
+                          { label: 'Anthropic Claude', value: 'anthropic/claude-3' },
+                          { label: 'DeepSeek R1', value: 'deepseek/r1' }
+                        ].map(m => (
+                          <div
+                            key={m.value}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              addChip('model', 'Model', m.value);
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 cursor-pointer transition-all font-mono"
+                          >
+                            {m.label}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Parameter: Log Content */}
+                  <div
+                    onClick={() => {
+                      setSelectedPendingKey('logs');
+                      setIsDropdownOpen(false);
+                      if (inputRef.current) inputRef.current.focus();
+                    }}
+                    className="flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 cursor-pointer transition-colors group"
+                  >
+                    <div className="flex items-center gap-2">
+                      <History size={14} className="text-slate-400 group-hover:text-blue-600" />
+                      <span>Log Content</span>
+                    </div>
+                    <span className="text-[10px] font-mono text-slate-400">Type value &crarr;</span>
                   </div>
                 </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
 
-                <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">Engine Model Parameter</label>
-                  <select
-                    value={selectedModel}
-                    onChange={(e) => setSelectedModel(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 text-slate-700 text-xs font-bold rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                  >
-                    <option value="ALL">All Engine Models</option>
-                    <option value="gpt-4o">OpenAI GPT-4o</option>
-                    <option value="gemini">Google Gemini</option>
-                    <option value="claude">Anthropic Claude</option>
-                    <option value="deepseek">DeepSeek R1</option>
-                  </select>
-                </div>
-
-                <div className="flex items-end justify-end">
-                  {hasActiveFilters && (
-                    <button
-                      onClick={() => {
-                        setSelectedStatus('ALL');
-                        setSelectedModel('ALL');
-                        setSearchScope('ALL');
-                        setSearchQuery('');
-                      }}
-                      className="text-xs font-bold text-rose-600 hover:text-rose-700 hover:underline flex items-center gap-1 py-1"
-                    >
-                      Reset All Filters
-                    </button>
-                  )}
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Active Filter Badges */}
-        {hasActiveFilters && !showFilterPanel && (
-          <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-100 text-xs">
-            <span className="text-slate-400 font-semibold text-[11px]">Active Filters:</span>
-            {searchScope !== 'ALL' && (
-              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-[11px] font-bold">
-                Scope: {searchScope}
-                <button onClick={() => setSearchScope('ALL')} className="hover:text-blue-900"><X size={12} /></button>
-              </span>
-            )}
-            {selectedStatus !== 'ALL' && (
-              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-[11px] font-bold">
-                Status: {selectedStatus}
-                <button onClick={() => setSelectedStatus('ALL')} className="hover:text-blue-900"><X size={12} /></button>
-              </span>
-            )}
-            {selectedModel !== 'ALL' && (
-              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-[11px] font-bold">
-                Model: {selectedModel}
-                <button onClick={() => setSelectedModel('ALL')} className="hover:text-blue-900"><X size={12} /></button>
-              </span>
-            )}
-            {searchQuery && (
-              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-[11px] font-bold">
-                "{searchQuery}"
-                <button onClick={() => setSearchQuery('')} className="hover:text-slate-900"><X size={12} /></button>
-              </span>
-            )}
-            <button
-              onClick={() => {
-                setSelectedStatus('ALL');
-                setSelectedModel('ALL');
-                setSearchScope('ALL');
-                setSearchQuery('');
-              }}
-              className="text-[11px] font-bold text-slate-400 hover:text-rose-600 ml-1 underline"
-            >
-              Clear All
-            </button>
+        {/* Display Choice: 10 / 15 / 20 results per page */}
+        <div className="flex items-center gap-2 shrink-0 justify-end border-t md:border-t-0 pt-3 md:pt-0 border-slate-100">
+          <span className="text-xs font-semibold text-slate-500 whitespace-nowrap">Display:</span>
+          <div className="inline-flex bg-slate-100 p-1 rounded-xl gap-1">
+            {[10, 15, 20].map((size) => (
+              <button
+                key={size}
+                onClick={() => setPageSize(size)}
+                className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all ${
+                  pageSize === size 
+                    ? 'bg-blue-600 text-white shadow-sm' 
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                }`}
+              >
+                {size}
+              </button>
+            ))}
           </div>
-        )}
+          <span className="text-xs text-slate-400 font-medium">/ page</span>
+        </div>
       </div>
 
       {/* Main List & Loading States */}
@@ -479,7 +597,7 @@ export default function HistoryTab({
           <div className="space-y-1">
             <h3 className="font-bold text-slate-900">No History Records Found</h3>
             <p className="text-sm text-slate-400">
-              {searchQuery ? 'No results match your search parameters.' : 'Run an analysis in the Log Analyzer tab to populate history.'}
+              {hasActiveFilters ? 'No results match your search parameters.' : 'Run an analysis in the Log Analyzer tab to populate history.'}
             </p>
           </div>
         </div>
