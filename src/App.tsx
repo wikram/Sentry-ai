@@ -469,12 +469,33 @@ export default function App() {
           setApiBackendUrl(configData.apiBackendUrl);
         }
 
-        // Then fetch supported models via backend
-        const modelsRes = await fetch('/api/models');
-        const modelsData = await modelsRes.json();
-        const models = (modelsData.data || []).sort((a: any, b: any) => {
-          const nameA = a.name || a.id;
-          const nameB = b.name || b.id;
+        // Fetch supported models via backend or direct OpenRouter API fallback
+        let fetchedModelsList: any[] = [];
+        try {
+          const modelsRes = await fetch('/api/models');
+          if (modelsRes.ok) {
+            const modelsData = await modelsRes.json();
+            fetchedModelsList = modelsData.data || (Array.isArray(modelsData) ? modelsData : []);
+          }
+        } catch (e) {
+          console.warn('/api/models endpoint unavailable, trying direct OpenRouter fetch...');
+        }
+
+        if (fetchedModelsList.length === 0) {
+          try {
+            const directRes = await fetch('https://openrouter.ai/api/v1/models');
+            if (directRes.ok) {
+              const directData = await directRes.json();
+              fetchedModelsList = directData.data || (Array.isArray(directData) ? directData : []);
+            }
+          } catch (e) {
+            console.error('Direct OpenRouter models fetch failed:', e);
+          }
+        }
+
+        const models = fetchedModelsList.sort((a: any, b: any) => {
+          const nameA = a.name || a.id || '';
+          const nameB = b.name || b.id || '';
           return nameA.localeCompare(nameB);
         });
         setSupportedModels(models);
@@ -1806,6 +1827,7 @@ export default function App() {
                 setAnalysisHistory={setAnalysisHistory}
                 expandedHistoryId={expandedHistoryId}
                 setExpandedHistoryId={setExpandedHistoryId}
+                supportedModels={supportedModels}
                 preferredBackendUrl={((): string => {
                   const defaultAgent = agents.find(a => a.isDefault) || agents.find(a => a.isActive) || agents[0];
                   const rawBackend = defaultAgent?.backendUrl || apiBackendUrl || '';

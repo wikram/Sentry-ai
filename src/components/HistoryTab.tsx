@@ -46,19 +46,96 @@ interface HistoryTabProps {
   setAnalysisHistory?: (history: HistoryItem[]) => void;
   expandedHistoryId?: string | null;
   setExpandedHistoryId?: (id: string | null) => void;
+  supportedModels?: any[];
   preferredBackendUrl?: string;
 }
+
+const FALLBACK_OPENROUTER_MODELS = [
+  { id: 'openai/gpt-4o', name: 'OpenAI: GPT-4o' },
+  { id: 'openai/gpt-4o-mini', name: 'OpenAI: GPT-4o Mini' },
+  { id: 'openai/o1', name: 'OpenAI: o1' },
+  { id: 'openai/o3-mini', name: 'OpenAI: o3-mini' },
+  { id: 'google/gemini-2.5-flash', name: 'Google: Gemini 2.5 Flash' },
+  { id: 'google/gemini-1.5-pro', name: 'Google: Gemini 1.5 Pro' },
+  { id: 'google/gemini-1.5-flash', name: 'Google: Gemini 1.5 Flash' },
+  { id: 'anthropic/claude-3.5-sonnet', name: 'Anthropic: Claude 3.5 Sonnet' },
+  { id: 'anthropic/claude-3-opus', name: 'Anthropic: Claude 3 Opus' },
+  { id: 'anthropic/claude-3.5-haiku', name: 'Anthropic: Claude 3.5 Haiku' },
+  { id: 'deepseek/deepseek-r1', name: 'DeepSeek: R1' },
+  { id: 'deepseek/deepseek-chat', name: 'DeepSeek: V3' },
+  { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Meta: Llama 3.3 70B' },
+  { id: 'meta-llama/llama-3.1-405b-instruct', name: 'Meta: Llama 3.1 405B' },
+  { id: 'mistralai/mistral-large-2411', name: 'Mistral: Mistral Large' },
+  { id: 'mistralai/pixtral-large-2411', name: 'Mistral: Pixtral Large' },
+  { id: 'qwen/qwen-2.5-coder-32b-instruct', name: 'Qwen: Qwen 2.5 Coder 32B' },
+  { id: 'perplexity/sonar-reasoning', name: 'Perplexity: Sonar Reasoning' },
+  { id: 'x-ai/grok-2-1212', name: 'xAI: Grok 2' },
+  { id: 'cohere/command-r-plus', name: 'Cohere: Command R+' }
+];
 
 export default function HistoryTab({
   analysisHistory = [],
   setAnalysisHistory,
   expandedHistoryId: propExpandedId,
   setExpandedHistoryId: propSetExpandedId,
+  supportedModels,
   preferredBackendUrl
 }: HistoryTabProps) {
   const [historyList, setHistoryList] = useState<HistoryItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+
+  // OpenRouter Models State for Filter Submenu
+  const [openRouterModels, setOpenRouterModels] = useState<any[]>(supportedModels || []);
+  const [modelSearchQuery, setModelSearchQuery] = useState<string>('');
+  const [isLoadingModels, setIsLoadingModels] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (supportedModels && supportedModels.length > 0) {
+      setOpenRouterModels(supportedModels);
+    } else {
+      setIsLoadingModels(true);
+      const loadModels = async () => {
+        try {
+          // Attempt 1: Server endpoint
+          const res = await fetch('/api/models');
+          if (res.ok) {
+            const data = await res.json();
+            const models = Array.isArray(data.data) ? data.data : (Array.isArray(data) ? data : []);
+            if (models.length > 0) {
+              setOpenRouterModels(models);
+              setIsLoadingModels(false);
+              return;
+            }
+          }
+        } catch (err) {
+          console.warn('/api/models endpoint failed, trying direct OpenRouter fetch:', err);
+        }
+
+        try {
+          // Attempt 2: Direct OpenRouter public API
+          const res = await fetch('https://openrouter.ai/api/v1/models');
+          if (res.ok) {
+            const data = await res.json();
+            const models = Array.isArray(data.data) ? data.data : (Array.isArray(data) ? data : []);
+            if (models.length > 0) {
+              setOpenRouterModels(models);
+              setIsLoadingModels(false);
+              return;
+            }
+          }
+        } catch (err) {
+          console.error('Direct OpenRouter fetch failed:', err);
+        }
+
+        // Fallback
+        setOpenRouterModels(FALLBACK_OPENROUTER_MODELS);
+        setIsLoadingModels(false);
+      };
+
+      loadModels();
+    }
+  }, [supportedModels]);
 
   // Pagination state: default 15 results per page
   const [pageSize, setPageSize] = useState<number>(15);
@@ -502,29 +579,68 @@ export default function HistoryTab({
                         <Cpu size={14} className="text-slate-400 group-hover:text-blue-600" />
                         <span>LLM Engine Model</span>
                       </div>
-                      <ChevronRight size={14} className="text-slate-400 group-hover:text-blue-600" />
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] bg-slate-100 text-slate-500 font-bold px-1.5 py-0.5 rounded-md font-mono">
+                          {(openRouterModels.length > 0 ? openRouterModels : FALLBACK_OPENROUTER_MODELS).length}
+                        </span>
+                        <ChevronRight size={14} className="text-slate-400 group-hover:text-blue-600" />
+                      </div>
                     </div>
 
                     {/* Model Submenu Options */}
                     {hoveredParam === 'model' && (
-                      <div className="ml-4 pl-3 border-l-2 border-blue-100 my-1 space-y-1">
-                        {[
-                          { label: 'OpenAI GPT-4o', value: 'openai/gpt-4o' },
-                          { label: 'Google Gemini', value: 'google/gemini-1.5' },
-                          { label: 'Anthropic Claude', value: 'anthropic/claude-3' },
-                          { label: 'DeepSeek R1', value: 'deepseek/r1' }
-                        ].map(m => (
-                          <div
-                            key={m.value}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              addChip('model', 'Model', m.value);
-                            }}
-                            className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 cursor-pointer transition-all font-mono"
-                          >
-                            {m.label}
-                          </div>
-                        ))}
+                      <div className="ml-2 pl-3 border-l-2 border-blue-100 my-1 space-y-2">
+                        {/* Quick filter input for model catalog */}
+                        <div className="relative my-1 pr-1">
+                          <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                          <input
+                            type="text"
+                            value={modelSearchQuery}
+                            onChange={(e) => setModelSearchQuery(e.target.value)}
+                            placeholder="Search OpenRouter models..."
+                            className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-7 pr-2 py-1 text-[11px] font-medium focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-slate-400"
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        </div>
+
+                        <div className="max-h-56 overflow-y-auto space-y-0.5 pr-1 text-left custom-scrollbar">
+                          {isLoadingModels && openRouterModels.length === 0 ? (
+                            <div className="py-2 text-[11px] text-slate-400 text-center flex items-center justify-center gap-1.5">
+                              <Loader2 size={12} className="animate-spin text-blue-500" />
+                              Loading OpenRouter catalog...
+                            </div>
+                          ) : (
+                            (openRouterModels.length > 0 ? openRouterModels : FALLBACK_OPENROUTER_MODELS)
+                              .filter(m => {
+                                if (!modelSearchQuery.trim()) return true;
+                                const q = modelSearchQuery.toLowerCase().trim();
+                                const nameStr = (m.name || m.label || '').toLowerCase();
+                                const idStr = (m.id || m.value || '').toLowerCase();
+                                return nameStr.includes(q) || idStr.includes(q);
+                              })
+                              .map(m => {
+                                const modelId = m.id || m.value;
+                                const modelName = m.name || m.label || modelId;
+                                return (
+                                  <div
+                                    key={modelId}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      addChip('model', 'Model', modelId);
+                                    }}
+                                    className="px-2.5 py-1.5 rounded-lg text-xs hover:bg-blue-50 hover:text-blue-900 cursor-pointer transition-all group flex flex-col gap-0.5"
+                                  >
+                                    <span className="font-bold text-slate-800 group-hover:text-blue-700 text-[11px] leading-tight truncate">
+                                      {modelName}
+                                    </span>
+                                    <span className="font-mono text-[9px] text-slate-400 group-hover:text-blue-500 truncate">
+                                      {modelId}
+                                    </span>
+                                  </div>
+                                );
+                              })
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
