@@ -9,19 +9,88 @@ import { motion } from 'motion/react';
 import { Incident } from '../types';
 import { formatShortDateTime } from '../lib/dateUtils';
 
-export function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode, label: string, active?: boolean, onClick: () => void }) {
+export function NavItem({ 
+  icon, 
+  label, 
+  active, 
+  onClick,
+  trailing,
+  badge,
+  isParent,
+  expanded
+}: { 
+  icon: React.ReactNode; 
+  label: string; 
+  active?: boolean; 
+  onClick: () => void;
+  trailing?: React.ReactNode;
+  badge?: string | number;
+  isParent?: boolean;
+  expanded?: boolean;
+}) {
   return (
     <button 
       onClick={onClick}
-      className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 ${
+      className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 group ${
         active 
           ? 'bg-slate-900 text-white shadow-lg shadow-slate-900/20' 
-          : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
+          : isParent && expanded
+            ? 'bg-slate-100/80 text-slate-900 font-bold'
+            : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
       }`}
     >
-      <span className={active ? 'text-white' : 'text-slate-400 group-hover:text-slate-900'}>{icon}</span>
-      <span>{label}</span>
-      {active && <motion.div layoutId="nav-dot" className="ml-auto w-1.5 h-1.5 rounded-full bg-blue-400" />}
+      <span className={`shrink-0 ${active ? 'text-white' : 'text-slate-400 group-hover:text-slate-900'}`}>{icon}</span>
+      <span className="truncate text-left flex-1">{label}</span>
+      {badge && (
+        <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md font-bold ${
+          active ? 'bg-slate-800 text-slate-200' : 'bg-slate-200 text-slate-600'
+        }`}>
+          {badge}
+        </span>
+      )}
+      {trailing}
+      {active && !trailing && <motion.div layoutId="nav-dot" className="ml-auto w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0" />}
+    </button>
+  );
+}
+
+export function SubNavItem({
+  icon,
+  label,
+  active,
+  onClick,
+  badge
+}: {
+  icon?: React.ReactNode;
+  label: string;
+  active?: boolean;
+  onClick: () => void;
+  badge?: string | number;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full flex items-center gap-2.5 pl-9 pr-3 py-2 rounded-lg text-xs font-semibold transition-all duration-150 group relative ${
+        active
+          ? 'bg-blue-50 text-blue-700 font-bold'
+          : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100/70'
+      }`}
+    >
+      {active && (
+        <motion.div 
+          layoutId="subnav-active-pill" 
+          className="absolute left-4 w-1 h-3.5 rounded-full bg-blue-600" 
+        />
+      )}
+      {icon && <span className={`shrink-0 ${active ? 'text-blue-600' : 'text-slate-400 group-hover:text-slate-700'}`}>{icon}</span>}
+      <span className="truncate flex-1 text-left">{label}</span>
+      {badge && (
+        <span className={`text-[9px] font-mono px-1.5 py-0.2 rounded-full font-bold ${
+          active ? 'bg-blue-200/70 text-blue-800' : 'bg-slate-100 text-slate-500'
+        }`}>
+          {badge}
+        </span>
+      )}
     </button>
   );
 }

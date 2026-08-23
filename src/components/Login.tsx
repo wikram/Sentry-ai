@@ -98,7 +98,7 @@ export default function Login({ onLogin }: LoginProps) {
             <ShieldAlert size={20} className="text-blue-500" />
           </div>
           <div>
-            <span className="text-sm font-black tracking-widest text-white">RCACENTRAL</span>
+            <span className="text-sm font-black tracking-widest text-white">DEVOPS CENTRAL</span>
             <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">System Governance</p>
           </div>
         </div>
@@ -148,7 +148,7 @@ export default function Login({ onLogin }: LoginProps) {
             <div className="w-16 h-16 bg-slate-900 rounded-2xl flex items-center justify-center mb-6 shadow-xl border border-white/10">
               <ShieldAlert size={32} className="text-blue-500" />
             </div>
-            <h1 className="text-3xl font-black tracking-tighter text-slate-900 mb-2">RCACENTRAL</h1>
+            <h1 className="text-3xl font-black tracking-tighter text-slate-900 mb-2">DevOps Central</h1>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Autonomous System Governance</p>
           </div>
 
@@ -161,7 +161,7 @@ export default function Login({ onLogin }: LoginProps) {
                 type="text" 
                 required
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-12 pr-4 py-3.5 text-sm text-slate-900 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all font-medium"
-                placeholder="operator@rca.central or username"
+                placeholder="operator@devops.central or username"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
               />

@@ -184,7 +184,6 @@ export default function HistoryTab({
         ? `${preferredBackendUrl.replace(/\/$/, '')}/api/list-history` 
         : '/api/list-history';
       
-      console.log('Fetching history from API endpoint:', endpoint);
       const response = await fetch(endpoint, {
         headers: { 'Accept': 'application/json' }
       });
@@ -692,7 +691,7 @@ export default function HistoryTab({
       {isLoading ? (
         <div className="bg-white border border-slate-200 rounded-2xl p-16 text-center flex flex-col items-center justify-center gap-3">
           <Loader2 size={32} className="animate-spin text-blue-600" />
-          <p className="text-xs font-bold text-slate-600 uppercase tracking-wider">Fetching History from /api/list-history...</p>
+          <p className="text-xs font-bold text-slate-600 uppercase tracking-wider">Loading Analysis History...</p>
         </div>
       ) : error && historyList.length === 0 ? (
         <div className="bg-rose-50 border border-rose-200 rounded-2xl p-8 text-center text-rose-700 text-xs font-medium space-y-2">

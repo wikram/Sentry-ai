@@ -15,6 +15,7 @@ import {
   Terminal,
   Radar,
   ChevronRight,
+  ChevronDown,
   AlertTriangle,
   CheckCircle2,
   Clock,
@@ -33,7 +34,10 @@ import {
   User,
   LogIn,
   LogOut,
-  RefreshCw
+  RefreshCw,
+  Sliders,
+  Layers,
+  Boxes
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Incident, RCAAgent } from './types';
@@ -51,7 +55,9 @@ import DataSourcesTab from './components/DataSourcesTab';
 import IntegrationsTab from './components/IntegrationsTab';
 import ModelsTab from './components/ModelsTab';
 import SettingsTab from './components/SettingsTab';
-import { NavItem } from './components/Common';
+import ConfigManagementTab from './components/ConfigManagementTab';
+import IaCTab from './components/IaCTab';
+import { NavItem, SubNavItem } from './components/Common';
 
 // Provision to configure backend system URL via environment variable
 const CONFIGURED_BACKEND_URL = (import.meta as any).env?.VITE_BACKEND_URL || "";
@@ -74,7 +80,8 @@ export default function App() {
     setIsAuthenticated(false);
     setUser(null);
   };
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'history' | 'log-analyzer' | 'agents' | 'data-sources' | 'integrations' | 'models' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'history' | 'log-analyzer' | 'agents' | 'data-sources' | 'integrations' | 'models' | 'settings' | 'config-management' | 'iac'>('dashboard');
+  const [isIncidentAnalyzerExpanded, setIsIncidentAnalyzerExpanded] = useState<boolean>(true);
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
   const [sources, setSources] = useState<any[]>([]);
   const [agents, setAgents] = useState<RCAAgent[]>([]);
@@ -1653,66 +1660,120 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
-      <aside className="w-64 border-r border-slate-200 bg-white flex flex-col">
-        <div className="p-6 flex items-center gap-3">
-          <div className="w-8 h-8 bg-slate-900 rounded flex items-center justify-center text-white">
+      <aside className="w-64 border-r border-slate-200 bg-white flex flex-col shrink-0">
+        <div className="p-5 flex items-center gap-3 border-b border-slate-100">
+          <div className="w-8 h-8 bg-slate-900 rounded-xl flex items-center justify-center text-white shadow-sm">
              <Radar size={18} />
           </div>
           <div className="flex flex-col">
-            <span className="font-bold tracking-tighter text-sm uppercase leading-none">DevSecOps</span>
-            <span className="font-medium tracking-tighter text-[9px] text-slate-400 uppercase leading-none">Incident Analyzer</span>
+            <span className="font-extrabold tracking-tight text-sm uppercase leading-none text-slate-900">DevOps Studio</span>
+            <span className="font-semibold tracking-wider text-[9px] text-slate-400 uppercase leading-none mt-1">Autonomous Operations</span>
           </div>
         </div>
 
-        <nav className="flex-1 px-4 space-y-1">
+        <nav className="flex-1 px-3 py-4 space-y-1.5 overflow-y-auto custom-scrollbar">
+          {/* 1. DevSecOps Incident Analyzer (Expandable Category) */}
+          <div className="space-y-1">
+            <NavItem 
+              icon={<Radar size={18} className={isIncidentAnalyzerExpanded ? "text-blue-600" : ""} />} 
+              label="DevSecOps Incident analyzer" 
+              active={false}
+              isParent={true}
+              expanded={isIncidentAnalyzerExpanded}
+              trailing={
+                <div className="text-slate-400 group-hover:text-slate-700 transition-transform">
+                  {isIncidentAnalyzerExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                </div>
+              }
+              onClick={() => {
+                setIsIncidentAnalyzerExpanded(!isIncidentAnalyzerExpanded);
+              }} 
+            />
+
+            {/* Sub-items with smooth expansion */}
+            <AnimatePresence initial={false}>
+              {isIncidentAnalyzerExpanded && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="space-y-0.5 overflow-hidden pl-1"
+                >
+                  <SubNavItem 
+                    icon={<LayoutDashboard size={14} />} 
+                    label="Active Incidents" 
+                    active={activeTab === 'dashboard'} 
+                    onClick={() => { setActiveTab('dashboard'); setSelectedIncident(null); }} 
+                  />
+                  <SubNavItem 
+                    icon={<Terminal size={14} />} 
+                    label="Log Analyzer" 
+                    active={activeTab === 'log-analyzer'} 
+                    onClick={() => setActiveTab('log-analyzer')} 
+                  />
+                  <SubNavItem 
+                    icon={<History size={14} />} 
+                    label="History" 
+                    active={activeTab === 'history'} 
+                    onClick={() => setActiveTab('history')} 
+                  />
+                  <SubNavItem 
+                    icon={<Database size={14} />} 
+                    label="Data Sources" 
+                    active={activeTab === 'data-sources'} 
+                    onClick={() => setActiveTab('data-sources')} 
+                  />
+                  <SubNavItem 
+                    icon={<Activity size={14} />} 
+                    label="Integrations" 
+                    active={activeTab === 'integrations'} 
+                    onClick={() => setActiveTab('integrations')} 
+                  />
+                  <SubNavItem 
+                    icon={<Terminal size={14} />} 
+                    label="Models info" 
+                    active={activeTab === 'models'} 
+                    onClick={() => setActiveTab('models')} 
+                  />
+                  <SubNavItem 
+                    icon={<Cpu size={14} />} 
+                    label="Agents" 
+                    active={activeTab === 'agents'} 
+                    onClick={() => {
+                      setActiveTab('agents');
+                      fetchAndSetAgents();
+                    }} 
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* 2. Configuration Management (Top-level option) */}
           <NavItem 
-            icon={<LayoutDashboard size={18} />} 
-            label="Active Incidents" 
-            active={activeTab === 'dashboard'} 
-            onClick={() => { setActiveTab('dashboard'); setSelectedIncident(null); }} 
-          />
-          <NavItem 
-            icon={<Terminal size={18} />} 
-            label="Log Analyzer" 
-            active={activeTab === 'log-analyzer'} 
-            onClick={() => setActiveTab('log-analyzer')} 
-          />
-          <NavItem 
-            icon={<History size={18} />} 
-            label="History" 
-            active={activeTab === 'history'} 
-            onClick={() => setActiveTab('history')} 
-          />
-          <NavItem 
-            icon={<Database size={18} />} 
-            label="Data Sources" 
-            active={activeTab === 'data-sources'} 
-            onClick={() => setActiveTab('data-sources')} 
-          />
-          <NavItem 
-            icon={<Activity size={18} />} 
-            label="Integrations" 
-            active={activeTab === 'integrations'} 
-            onClick={() => setActiveTab('integrations')} 
-          />
-          <NavItem 
-            icon={<Terminal size={18} />} 
-            label="Models info" 
-            active={activeTab === 'models'} 
-            onClick={() => setActiveTab('models')} 
-          />
-          <NavItem 
-            icon={<Cpu size={18} />} 
-            label="Agents" 
-            active={activeTab === 'agents'} 
+            icon={<Sliders size={18} />} 
+            label="Configuration Management" 
+            active={activeTab === 'config-management'} 
             onClick={() => {
-              setActiveTab('agents');
-              fetchAndSetAgents();
+              setActiveTab('config-management');
+              setSelectedIncident(null);
+            }} 
+          />
+
+          {/* 3. Infrastructure as a Code (Top-level option) */}
+          <NavItem 
+            icon={<Layers size={18} />} 
+            label="Infrastructure as a Code" 
+            active={activeTab === 'iac'} 
+            onClick={() => {
+              setActiveTab('iac');
+              setSelectedIncident(null);
             }} 
           />
         </nav>
 
-        <div className="p-4 mt-auto border-t border-slate-100 bg-slate-50/50 space-y-1">
+        <div className="p-3 mt-auto border-t border-slate-100 bg-slate-50/50 space-y-1">
           <NavItem 
             icon={<Settings size={18} />} 
             label="Settings" 
@@ -1734,7 +1795,17 @@ export default function App() {
         <header className="h-16 border-b border-slate-200 bg-white/80 backdrop-blur-md flex items-center justify-between px-8 z-10 shadow-sm">
           <div className="flex items-center gap-4">
             <h1 className="text-[11px] font-bold text-slate-400 uppercase tracking-[0.2em]">
-              {selectedIncident ? `INCIDENT / ${selectedIncident.id}` : activeTab === 'dashboard' ? 'Overview' : activeTab === 'data-sources' ? 'Data Sources' : activeTab.toUpperCase()}
+              {selectedIncident 
+                ? `INCIDENT / ${selectedIncident.id}` 
+                : activeTab === 'dashboard' 
+                  ? 'DevSecOps / Active Incidents' 
+                  : activeTab === 'config-management'
+                    ? 'DevOps / Configuration Management'
+                    : activeTab === 'iac'
+                      ? 'DevOps / Infrastructure as Code'
+                      : activeTab === 'data-sources' 
+                        ? 'Data Sources' 
+                        : activeTab.toUpperCase()}
             </h1>
           </div>
           <div className="flex items-center gap-6">
@@ -1794,6 +1865,10 @@ export default function App() {
                 agents={agents}
                 onClose={() => setSelectedIncident(null)} 
               />
+            ) : activeTab === 'config-management' ? (
+              <ConfigManagementTab />
+            ) : activeTab === 'iac' ? (
+              <IaCTab />
             ) : activeTab === 'dashboard' ? (
               <DashboardTab
                 agents={agents}
