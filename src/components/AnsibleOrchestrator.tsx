@@ -34,7 +34,9 @@ import {
   Users,
   Activity,
   Download,
-  Flame
+  Flame,
+  GitBranch,
+  GitCommit
 } from 'lucide-react';
 
 export interface AnsiblePlaybook {
@@ -765,7 +767,18 @@ export default function AnsibleOrchestrator() {
             <div className="lg:col-span-7 space-y-4">
               <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-6">
                 <div>
-                  <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-400 mb-3">2. Execution Configuration & Target Fleet</h3>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-400">2. Execution Configuration &amp; Target Fleet</h3>
+                    <div className="flex items-center gap-2 font-mono text-[11px]">
+                      <span className="flex items-center gap-1 bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200 font-bold">
+                        <FolderGit2 size={12} className="text-indigo-600" />
+                        GitHub: enterprise/ansible-playbooks @ main
+                      </span>
+                      <span className="text-indigo-600 font-bold bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100">
+                        e4b7c21
+                      </span>
+                    </div>
+                  </div>
                   
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {/* Inventory Group */}

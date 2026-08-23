@@ -61,6 +61,12 @@ import IntegrationsTab from './components/IntegrationsTab';
 import ModelsTab from './components/ModelsTab';
 import SettingsTab from './components/SettingsTab';
 import ConfigManagementTab from './components/ConfigManagementTab';
+import AnsibleOrchestrator from './components/AnsibleOrchestrator';
+import HostInventoryPage from './components/config-mgmt/HostInventoryPage';
+import PlaybooksConfigPage from './components/config-mgmt/PlaybooksConfigPage';
+import SecretsVaultPage from './components/config-mgmt/SecretsVaultPage';
+import CisCompliancePage from './components/config-mgmt/CisCompliancePage';
+import ExecutionRunsPage from './components/config-mgmt/ExecutionRunsPage';
 import IaCTab from './components/IaCTab';
 import { NavItem, SubNavItem } from './components/Common';
 
@@ -91,8 +97,25 @@ export default function App() {
     | 'iac' | 'iac-stacks' | 'iac-plan' | 'iac-security' | 'iac-cost' | 'iac-templates'
   >('dashboard');
   const [isIncidentAnalyzerExpanded, setIsIncidentAnalyzerExpanded] = useState<boolean>(true);
-  const [isConfigExpanded, setIsConfigExpanded] = useState<boolean>(true);
+  const [isConfigExpanded, setIsConfigExpanded] = useState<boolean>(false);
   const [isIacExpanded, setIsIacExpanded] = useState<boolean>(false);
+
+  // Synchronize accordion expansion when activeTab switches
+  useEffect(() => {
+    if (activeTab.startsWith('cm-') || activeTab === 'config-management') {
+      setIsConfigExpanded(true);
+      setIsIncidentAnalyzerExpanded(false);
+      setIsIacExpanded(false);
+    } else if (activeTab.startsWith('iac')) {
+      setIsIacExpanded(true);
+      setIsIncidentAnalyzerExpanded(false);
+      setIsConfigExpanded(false);
+    } else if (['dashboard', 'history', 'log-analyzer', 'agents', 'data-sources', 'integrations', 'models'].includes(activeTab)) {
+      setIsIncidentAnalyzerExpanded(true);
+      setIsConfigExpanded(false);
+      setIsIacExpanded(false);
+    }
+  }, [activeTab]);
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
   const [sources, setSources] = useState<any[]>([]);
   const [agents, setAgents] = useState<RCAAgent[]>([]);
@@ -1697,7 +1720,16 @@ export default function App() {
                 </div>
               }
               onClick={() => {
-                setIsIncidentAnalyzerExpanded(!isIncidentAnalyzerExpanded);
+                const next = !isIncidentAnalyzerExpanded;
+                setIsIncidentAnalyzerExpanded(next);
+                if (next) {
+                  setIsConfigExpanded(false);
+                  setIsIacExpanded(false);
+                  if (!['dashboard', 'history', 'log-analyzer', 'agents', 'data-sources', 'integrations', 'models'].includes(activeTab)) {
+                    setActiveTab('dashboard');
+                    setSelectedIncident(null);
+                  }
+                }
               }} 
             />
 
@@ -1715,43 +1747,77 @@ export default function App() {
                     icon={<LayoutDashboard size={14} />} 
                     label="Active Incidents" 
                     active={activeTab === 'dashboard'} 
-                    onClick={() => { setActiveTab('dashboard'); setSelectedIncident(null); }} 
+                    onClick={() => { 
+                      setIsIncidentAnalyzerExpanded(true);
+                      setIsConfigExpanded(false);
+                      setIsIacExpanded(false);
+                      setActiveTab('dashboard'); 
+                      setSelectedIncident(null); 
+                    }} 
                   />
                   <SubNavItem 
                     icon={<Terminal size={14} />} 
                     label="Log Analyzer" 
                     active={activeTab === 'log-analyzer'} 
-                    onClick={() => setActiveTab('log-analyzer')} 
+                    onClick={() => {
+                      setIsIncidentAnalyzerExpanded(true);
+                      setIsConfigExpanded(false);
+                      setIsIacExpanded(false);
+                      setActiveTab('log-analyzer');
+                    }} 
                   />
                   <SubNavItem 
                     icon={<History size={14} />} 
                     label="History" 
                     active={activeTab === 'history'} 
-                    onClick={() => setActiveTab('history')} 
+                    onClick={() => {
+                      setIsIncidentAnalyzerExpanded(true);
+                      setIsConfigExpanded(false);
+                      setIsIacExpanded(false);
+                      setActiveTab('history');
+                    }} 
                   />
                   <SubNavItem 
                     icon={<Database size={14} />} 
                     label="Data Sources" 
                     active={activeTab === 'data-sources'} 
-                    onClick={() => setActiveTab('data-sources')} 
+                    onClick={() => {
+                      setIsIncidentAnalyzerExpanded(true);
+                      setIsConfigExpanded(false);
+                      setIsIacExpanded(false);
+                      setActiveTab('data-sources');
+                    }} 
                   />
                   <SubNavItem 
                     icon={<Activity size={14} />} 
                     label="Integrations" 
                     active={activeTab === 'integrations'} 
-                    onClick={() => setActiveTab('integrations')} 
+                    onClick={() => {
+                      setIsIncidentAnalyzerExpanded(true);
+                      setIsConfigExpanded(false);
+                      setIsIacExpanded(false);
+                      setActiveTab('integrations');
+                    }} 
                   />
                   <SubNavItem 
                     icon={<Terminal size={14} />} 
                     label="Models info" 
                     active={activeTab === 'models'} 
-                    onClick={() => setActiveTab('models')} 
+                    onClick={() => {
+                      setIsIncidentAnalyzerExpanded(true);
+                      setIsConfigExpanded(false);
+                      setIsIacExpanded(false);
+                      setActiveTab('models');
+                    }} 
                   />
                   <SubNavItem 
                     icon={<Cpu size={14} />} 
                     label="Agents" 
                     active={activeTab === 'agents'} 
                     onClick={() => {
+                      setIsIncidentAnalyzerExpanded(true);
+                      setIsConfigExpanded(false);
+                      setIsIacExpanded(false);
                       setActiveTab('agents');
                       fetchAndSetAgents();
                     }} 
@@ -1777,9 +1843,13 @@ export default function App() {
               onClick={() => {
                 const next = !isConfigExpanded;
                 setIsConfigExpanded(next);
-                if (next && !activeTab.startsWith('cm-') && activeTab !== 'config-management') {
-                  setActiveTab('cm-orchestrator');
-                  setSelectedIncident(null);
+                if (next) {
+                  setIsIncidentAnalyzerExpanded(false);
+                  setIsIacExpanded(false);
+                  if (!activeTab.startsWith('cm-') && activeTab !== 'config-management') {
+                    setActiveTab('cm-orchestrator');
+                    setSelectedIncident(null);
+                  }
                 }
               }} 
             />
@@ -1798,37 +1868,73 @@ export default function App() {
                     icon={<Play size={14} className={activeTab === 'cm-orchestrator' || activeTab === 'config-management' ? 'text-indigo-600' : ''} />} 
                     label="Ansible Orchestrator" 
                     active={activeTab === 'cm-orchestrator' || activeTab === 'config-management'} 
-                    onClick={() => { setActiveTab('cm-orchestrator'); setSelectedIncident(null); }} 
+                    onClick={() => { 
+                      setIsConfigExpanded(true);
+                      setIsIncidentAnalyzerExpanded(false);
+                      setIsIacExpanded(false);
+                      setActiveTab('cm-orchestrator'); 
+                      setSelectedIncident(null); 
+                    }} 
                   />
                   <SubNavItem 
                     icon={<Server size={14} />} 
                     label="Host Inventory & Drift" 
                     active={activeTab === 'cm-nodes'} 
-                    onClick={() => { setActiveTab('cm-nodes'); setSelectedIncident(null); }} 
+                    onClick={() => { 
+                      setIsConfigExpanded(true);
+                      setIsIncidentAnalyzerExpanded(false);
+                      setIsIacExpanded(false);
+                      setActiveTab('cm-nodes'); 
+                      setSelectedIncident(null); 
+                    }} 
                   />
                   <SubNavItem 
                     icon={<FileCode size={14} />} 
                     label="Playbooks & ConfigMaps" 
                     active={activeTab === 'cm-manifests'} 
-                    onClick={() => { setActiveTab('cm-manifests'); setSelectedIncident(null); }} 
+                    onClick={() => { 
+                      setIsConfigExpanded(true);
+                      setIsIncidentAnalyzerExpanded(false);
+                      setIsIacExpanded(false);
+                      setActiveTab('cm-manifests'); 
+                      setSelectedIncident(null); 
+                    }} 
                   />
                   <SubNavItem 
                     icon={<Lock size={14} />} 
                     label="Secrets & Vault" 
                     active={activeTab === 'cm-secrets'} 
-                    onClick={() => { setActiveTab('cm-secrets'); setSelectedIncident(null); }} 
+                    onClick={() => { 
+                      setIsConfigExpanded(true);
+                      setIsIncidentAnalyzerExpanded(false);
+                      setIsIacExpanded(false);
+                      setActiveTab('cm-secrets'); 
+                      setSelectedIncident(null); 
+                    }} 
                   />
                   <SubNavItem 
                     icon={<ShieldCheck size={14} />} 
                     label="CIS Benchmark Audits" 
                     active={activeTab === 'cm-compliance'} 
-                    onClick={() => { setActiveTab('cm-compliance'); setSelectedIncident(null); }} 
+                    onClick={() => { 
+                      setIsConfigExpanded(true);
+                      setIsIncidentAnalyzerExpanded(false);
+                      setIsIacExpanded(false);
+                      setActiveTab('cm-compliance'); 
+                      setSelectedIncident(null); 
+                    }} 
                   />
                   <SubNavItem 
                     icon={<Terminal size={14} />} 
                     label="Execution Runs" 
                     active={activeTab === 'cm-runs'} 
-                    onClick={() => { setActiveTab('cm-runs'); setSelectedIncident(null); }} 
+                    onClick={() => { 
+                      setIsConfigExpanded(true);
+                      setIsIncidentAnalyzerExpanded(false);
+                      setIsIacExpanded(false);
+                      setActiveTab('cm-runs'); 
+                      setSelectedIncident(null); 
+                    }} 
                   />
                 </motion.div>
               )}
@@ -1851,9 +1957,13 @@ export default function App() {
               onClick={() => {
                 const next = !isIacExpanded;
                 setIsIacExpanded(next);
-                if (next && !activeTab.startsWith('iac')) {
-                  setActiveTab('iac-stacks');
-                  setSelectedIncident(null);
+                if (next) {
+                  setIsIncidentAnalyzerExpanded(false);
+                  setIsConfigExpanded(false);
+                  if (!activeTab.startsWith('iac')) {
+                    setActiveTab('iac-stacks');
+                    setSelectedIncident(null);
+                  }
                 }
               }} 
             />
@@ -1872,31 +1982,61 @@ export default function App() {
                     icon={<Boxes size={14} />} 
                     label="Workspaces & Stacks" 
                     active={activeTab === 'iac-stacks' || activeTab === 'iac'} 
-                    onClick={() => { setActiveTab('iac-stacks'); setSelectedIncident(null); }} 
+                    onClick={() => { 
+                      setIsIacExpanded(true);
+                      setIsIncidentAnalyzerExpanded(false);
+                      setIsConfigExpanded(false);
+                      setActiveTab('iac-stacks'); 
+                      setSelectedIncident(null); 
+                    }} 
                   />
                   <SubNavItem 
                     icon={<Terminal size={14} />} 
                     label="Plan & Execution Engine" 
                     active={activeTab === 'iac-plan'} 
-                    onClick={() => { setActiveTab('iac-plan'); setSelectedIncident(null); }} 
+                    onClick={() => { 
+                      setIsIacExpanded(true);
+                      setIsIncidentAnalyzerExpanded(false);
+                      setIsConfigExpanded(false);
+                      setActiveTab('iac-plan'); 
+                      setSelectedIncident(null); 
+                    }} 
                   />
                   <SubNavItem 
                     icon={<ShieldCheck size={14} />} 
                     label="Checkov & Security Gates" 
                     active={activeTab === 'iac-security'} 
-                    onClick={() => { setActiveTab('iac-security'); setSelectedIncident(null); }} 
+                    onClick={() => { 
+                      setIsIacExpanded(true);
+                      setIsIncidentAnalyzerExpanded(false);
+                      setIsConfigExpanded(false);
+                      setActiveTab('iac-security'); 
+                      setSelectedIncident(null); 
+                    }} 
                   />
                   <SubNavItem 
                     icon={<DollarSign size={14} />} 
                     label="Infracost Budget Impact" 
                     active={activeTab === 'iac-cost'} 
-                    onClick={() => { setActiveTab('iac-cost'); setSelectedIncident(null); }} 
+                    onClick={() => { 
+                      setIsIacExpanded(true);
+                      setIsIncidentAnalyzerExpanded(false);
+                      setIsConfigExpanded(false);
+                      setActiveTab('iac-cost'); 
+                      setSelectedIncident(null); 
+                    }} 
                   />
                   <SubNavItem 
                     icon={<FileCode size={14} />} 
                     label="IaC Blueprint Library" 
                     active={activeTab === 'iac-templates'} 
-                    onClick={() => { setActiveTab('iac-templates'); setSelectedIncident(null); }} 
+                    onClick={() => { 
+                      setIsIacExpanded(true);
+                      setIsIncidentAnalyzerExpanded(false);
+                      setIsConfigExpanded(false);
+                      setActiveTab('iac-templates'); 
+                      setSelectedIncident(null); 
+                    }} 
                   />
                 </motion.div>
               )}
@@ -2024,19 +2164,18 @@ export default function App() {
                 agents={agents}
                 onClose={() => setSelectedIncident(null)} 
               />
-            ) : (activeTab.startsWith('cm-') || activeTab === 'config-management') ? (
-              <ConfigManagementTab 
-                initialSubTab={
-                  activeTab === 'cm-nodes' ? 'nodes' :
-                  activeTab === 'cm-manifests' ? 'manifests' :
-                  activeTab === 'cm-secrets' ? 'secrets' :
-                  activeTab === 'cm-compliance' ? 'compliance' :
-                  activeTab === 'cm-runs' ? 'runs' : 'orchestrator'
-                }
-                onSubTabChange={(subTab) => {
-                  setActiveTab(`cm-${subTab}` as any);
-                }}
-              />
+            ) : (activeTab === 'cm-orchestrator' || activeTab === 'config-management') ? (
+              <AnsibleOrchestrator />
+            ) : activeTab === 'cm-nodes' ? (
+              <HostInventoryPage />
+            ) : activeTab === 'cm-manifests' ? (
+              <PlaybooksConfigPage onLaunchOrchestrator={() => setActiveTab('cm-orchestrator')} />
+            ) : activeTab === 'cm-secrets' ? (
+              <SecretsVaultPage />
+            ) : activeTab === 'cm-compliance' ? (
+              <CisCompliancePage />
+            ) : activeTab === 'cm-runs' ? (
+              <ExecutionRunsPage />
             ) : (activeTab.startsWith('iac-') || activeTab === 'iac') ? (
               <IaCTab 
                 initialSubTab={
