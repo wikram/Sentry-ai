@@ -28,8 +28,10 @@ import {
   Lock,
   RotateCw,
   GitBranch,
-  Filter
+  Filter,
+  Zap
 } from 'lucide-react';
+import AnsibleOrchestrator from './AnsibleOrchestrator';
 
 interface HostNode {
   id: string;
@@ -279,7 +281,7 @@ const INITIAL_SECRETS: SecretItem[] = [
 ];
 
 export default function ConfigManagementTab() {
-  const [activeSubTab, setActiveSubTab] = useState<'nodes' | 'manifests' | 'secrets' | 'compliance' | 'runs'>('nodes');
+  const [activeSubTab, setActiveSubTab] = useState<'orchestrator' | 'nodes' | 'manifests' | 'secrets' | 'compliance' | 'runs'>('orchestrator');
   const [nodes, setNodes] = useState<HostNode[]>(INITIAL_NODES);
   const [manifests, setManifests] = useState<ConfigManifest[]>(INITIAL_MANIFESTS);
   const [secrets, setSecrets] = useState<SecretItem[]>(INITIAL_SECRETS);
@@ -440,6 +442,7 @@ export default function ConfigManagementTab() {
       <div className="flex items-center justify-between border-b border-slate-200 pb-2">
         <div className="flex items-center gap-2 overflow-x-auto custom-scrollbar">
           {[
+            { id: 'orchestrator', label: 'Ansible Orchestrator', icon: <Play size={14} className={activeSubTab === 'orchestrator' ? 'text-indigo-400' : 'text-indigo-600'} />, badge: 'ENGINE' },
             { id: 'nodes', label: 'Host Inventory & Drift', icon: <Server size={14} />, count: nodes.length },
             { id: 'manifests', label: 'Playbooks & ConfigMaps', icon: <FileCode size={14} />, count: manifests.length },
             { id: 'secrets', label: 'Secrets & Vault', icon: <Lock size={14} />, count: secrets.length },
@@ -457,6 +460,13 @@ export default function ConfigManagementTab() {
             >
               {tab.icon}
               <span>{tab.label}</span>
+              {tab.badge && (
+                <span className={`text-[9px] px-1.5 py-0.2 rounded-md font-mono font-black ${
+                  activeSubTab === tab.id ? 'bg-indigo-500 text-white' : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                }`}>
+                  {tab.badge}
+                </span>
+              )}
               {tab.count !== undefined && (
                 <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
                   activeSubTab === tab.id ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-500'
@@ -471,6 +481,18 @@ export default function ConfigManagementTab() {
 
       {/* Sub-Tab Content */}
       <AnimatePresence mode="wait">
+        {/* 0. Ansible Orchestrator Engine */}
+        {activeSubTab === 'orchestrator' && (
+          <motion.div
+            key="orchestrator-view"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+          >
+            <AnsibleOrchestrator />
+          </motion.div>
+        )}
+
         {/* 1. Host Inventory & Drift */}
         {activeSubTab === 'nodes' && (
           <motion.div
@@ -730,6 +752,15 @@ export default function ConfigManagementTab() {
                   <span className="font-mono text-xs font-bold text-white">{selectedManifest.path}</span>
                 </div>
                 <div className="flex items-center gap-2">
+                  {selectedManifest.type === 'ansible' && (
+                    <button
+                      onClick={() => setActiveSubTab('orchestrator')}
+                      className="px-3 py-1 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5"
+                    >
+                      <Play size={12} />
+                      <span>Launch in Orchestrator</span>
+                    </button>
+                  )}
                   <button
                     onClick={() => {
                       alert('Manifest syntax validated successfully: 0 errors.');
