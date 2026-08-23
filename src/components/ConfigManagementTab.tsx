@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Sliders, 
@@ -280,8 +280,26 @@ const INITIAL_SECRETS: SecretItem[] = [
   }
 ];
 
-export default function ConfigManagementTab() {
-  const [activeSubTab, setActiveSubTab] = useState<'orchestrator' | 'nodes' | 'manifests' | 'secrets' | 'compliance' | 'runs'>('orchestrator');
+export interface ConfigManagementTabProps {
+  initialSubTab?: 'orchestrator' | 'nodes' | 'manifests' | 'secrets' | 'compliance' | 'runs';
+  onSubTabChange?: (tab: 'orchestrator' | 'nodes' | 'manifests' | 'secrets' | 'compliance' | 'runs') => void;
+}
+
+export default function ConfigManagementTab({ initialSubTab = 'orchestrator', onSubTabChange }: ConfigManagementTabProps) {
+  const [activeSubTab, setActiveSubTab] = useState<'orchestrator' | 'nodes' | 'manifests' | 'secrets' | 'compliance' | 'runs'>(initialSubTab);
+
+  useEffect(() => {
+    if (initialSubTab) {
+      setActiveSubTab(initialSubTab);
+    }
+  }, [initialSubTab]);
+
+  const handleSubTabClick = (tab: 'orchestrator' | 'nodes' | 'manifests' | 'secrets' | 'compliance' | 'runs') => {
+    setActiveSubTab(tab);
+    if (onSubTabChange) {
+      onSubTabChange(tab);
+    }
+  };
   const [nodes, setNodes] = useState<HostNode[]>(INITIAL_NODES);
   const [manifests, setManifests] = useState<ConfigManifest[]>(INITIAL_MANIFESTS);
   const [secrets, setSecrets] = useState<SecretItem[]>(INITIAL_SECRETS);
@@ -451,7 +469,7 @@ export default function ConfigManagementTab() {
           ].map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveSubTab(tab.id as any)}
+              onClick={() => handleSubTabClick(tab.id as any)}
               className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all whitespace-nowrap ${
                 activeSubTab === tab.id
                   ? 'bg-slate-900 text-white shadow-sm'

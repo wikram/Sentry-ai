@@ -244,8 +244,26 @@ module "eks" {
   }
 ];
 
-export default function IaCTab() {
-  const [activeSubTab, setActiveSubTab] = useState<'workspaces' | 'plan' | 'security' | 'cost' | 'templates'>('workspaces');
+export interface IaCTabProps {
+  initialSubTab?: 'workspaces' | 'plan' | 'security' | 'cost' | 'templates';
+  onSubTabChange?: (tab: 'workspaces' | 'plan' | 'security' | 'cost' | 'templates') => void;
+}
+
+export default function IaCTab({ initialSubTab = 'workspaces', onSubTabChange }: IaCTabProps) {
+  const [activeSubTab, setActiveSubTab] = useState<'workspaces' | 'plan' | 'security' | 'cost' | 'templates'>(initialSubTab);
+
+  React.useEffect(() => {
+    if (initialSubTab) {
+      setActiveSubTab(initialSubTab);
+    }
+  }, [initialSubTab]);
+
+  const handleSubTabClick = (tab: 'workspaces' | 'plan' | 'security' | 'cost' | 'templates') => {
+    setActiveSubTab(tab);
+    if (onSubTabChange) {
+      onSubTabChange(tab);
+    }
+  };
   const [stacks, setStacks] = useState<IaCStack[]>(INITIAL_STACKS);
   const [selectedStack, setSelectedStack] = useState<IaCStack>(INITIAL_STACKS[0]);
   const [isPlanning, setIsPlanning] = useState<boolean>(false);
@@ -418,7 +436,7 @@ export default function IaCTab() {
           ].map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveSubTab(tab.id as any)}
+              onClick={() => handleSubTabClick(tab.id as any)}
               className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all whitespace-nowrap ${
                 activeSubTab === tab.id
                   ? 'bg-slate-900 text-white shadow-sm'

@@ -37,7 +37,12 @@ import {
   RefreshCw,
   Sliders,
   Layers,
-  Boxes
+  Boxes,
+  Server,
+  FileCode,
+  Play,
+  DollarSign,
+  Cloud
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Incident, RCAAgent } from './types';
@@ -80,8 +85,14 @@ export default function App() {
     setIsAuthenticated(false);
     setUser(null);
   };
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'history' | 'log-analyzer' | 'agents' | 'data-sources' | 'integrations' | 'models' | 'settings' | 'config-management' | 'iac'>('dashboard');
+  const [activeTab, setActiveTab] = useState<
+    | 'dashboard' | 'history' | 'log-analyzer' | 'agents' | 'data-sources' | 'integrations' | 'models' | 'settings'
+    | 'config-management' | 'cm-orchestrator' | 'cm-nodes' | 'cm-manifests' | 'cm-secrets' | 'cm-compliance' | 'cm-runs'
+    | 'iac' | 'iac-stacks' | 'iac-plan' | 'iac-security' | 'iac-cost' | 'iac-templates'
+  >('dashboard');
   const [isIncidentAnalyzerExpanded, setIsIncidentAnalyzerExpanded] = useState<boolean>(true);
+  const [isConfigExpanded, setIsConfigExpanded] = useState<boolean>(true);
+  const [isIacExpanded, setIsIacExpanded] = useState<boolean>(false);
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
   const [sources, setSources] = useState<any[]>([]);
   const [agents, setAgents] = useState<RCAAgent[]>([]);
@@ -1750,27 +1761,147 @@ export default function App() {
             </AnimatePresence>
           </div>
 
-          {/* 2. Configuration Management (Top-level option) */}
-          <NavItem 
-            icon={<Sliders size={18} />} 
-            label="Configuration Management" 
-            active={activeTab === 'config-management'} 
-            onClick={() => {
-              setActiveTab('config-management');
-              setSelectedIncident(null);
-            }} 
-          />
+          {/* 2. Configuration Management (Expandable Category) */}
+          <div className="space-y-1">
+            <NavItem 
+              icon={<Sliders size={18} className={isConfigExpanded ? "text-indigo-600" : ""} />} 
+              label="Configuration Management" 
+              active={false}
+              isParent={true}
+              expanded={isConfigExpanded}
+              trailing={
+                <div className="text-slate-400 group-hover:text-slate-700 transition-transform">
+                  {isConfigExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                </div>
+              }
+              onClick={() => {
+                const next = !isConfigExpanded;
+                setIsConfigExpanded(next);
+                if (next && !activeTab.startsWith('cm-') && activeTab !== 'config-management') {
+                  setActiveTab('cm-orchestrator');
+                  setSelectedIncident(null);
+                }
+              }} 
+            />
 
-          {/* 3. Infrastructure as a Code (Top-level option) */}
-          <NavItem 
-            icon={<Layers size={18} />} 
-            label="Infrastructure as a Code" 
-            active={activeTab === 'iac'} 
-            onClick={() => {
-              setActiveTab('iac');
-              setSelectedIncident(null);
-            }} 
-          />
+            {/* Sub-items with smooth expansion */}
+            <AnimatePresence initial={false}>
+              {isConfigExpanded && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="space-y-0.5 overflow-hidden pl-1"
+                >
+                  <SubNavItem 
+                    icon={<Play size={14} className={activeTab === 'cm-orchestrator' || activeTab === 'config-management' ? 'text-indigo-600' : ''} />} 
+                    label="Ansible Orchestrator" 
+                    active={activeTab === 'cm-orchestrator' || activeTab === 'config-management'} 
+                    onClick={() => { setActiveTab('cm-orchestrator'); setSelectedIncident(null); }} 
+                  />
+                  <SubNavItem 
+                    icon={<Server size={14} />} 
+                    label="Host Inventory & Drift" 
+                    active={activeTab === 'cm-nodes'} 
+                    onClick={() => { setActiveTab('cm-nodes'); setSelectedIncident(null); }} 
+                  />
+                  <SubNavItem 
+                    icon={<FileCode size={14} />} 
+                    label="Playbooks & ConfigMaps" 
+                    active={activeTab === 'cm-manifests'} 
+                    onClick={() => { setActiveTab('cm-manifests'); setSelectedIncident(null); }} 
+                  />
+                  <SubNavItem 
+                    icon={<Lock size={14} />} 
+                    label="Secrets & Vault" 
+                    active={activeTab === 'cm-secrets'} 
+                    onClick={() => { setActiveTab('cm-secrets'); setSelectedIncident(null); }} 
+                  />
+                  <SubNavItem 
+                    icon={<ShieldCheck size={14} />} 
+                    label="CIS Benchmark Audits" 
+                    active={activeTab === 'cm-compliance'} 
+                    onClick={() => { setActiveTab('cm-compliance'); setSelectedIncident(null); }} 
+                  />
+                  <SubNavItem 
+                    icon={<Terminal size={14} />} 
+                    label="Execution Runs" 
+                    active={activeTab === 'cm-runs'} 
+                    onClick={() => { setActiveTab('cm-runs'); setSelectedIncident(null); }} 
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
+          {/* 3. Infrastructure as a Code (Expandable Category) */}
+          <div className="space-y-1">
+            <NavItem 
+              icon={<Layers size={18} className={isIacExpanded ? "text-cyan-600" : ""} />} 
+              label="Infrastructure as a Code" 
+              active={false}
+              isParent={true}
+              expanded={isIacExpanded}
+              trailing={
+                <div className="text-slate-400 group-hover:text-slate-700 transition-transform">
+                  {isIacExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                </div>
+              }
+              onClick={() => {
+                const next = !isIacExpanded;
+                setIsIacExpanded(next);
+                if (next && !activeTab.startsWith('iac')) {
+                  setActiveTab('iac-stacks');
+                  setSelectedIncident(null);
+                }
+              }} 
+            />
+
+            {/* Sub-items with smooth expansion */}
+            <AnimatePresence initial={false}>
+              {isIacExpanded && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="space-y-0.5 overflow-hidden pl-1"
+                >
+                  <SubNavItem 
+                    icon={<Boxes size={14} />} 
+                    label="Workspaces & Stacks" 
+                    active={activeTab === 'iac-stacks' || activeTab === 'iac'} 
+                    onClick={() => { setActiveTab('iac-stacks'); setSelectedIncident(null); }} 
+                  />
+                  <SubNavItem 
+                    icon={<Terminal size={14} />} 
+                    label="Plan & Execution Engine" 
+                    active={activeTab === 'iac-plan'} 
+                    onClick={() => { setActiveTab('iac-plan'); setSelectedIncident(null); }} 
+                  />
+                  <SubNavItem 
+                    icon={<ShieldCheck size={14} />} 
+                    label="Checkov & Security Gates" 
+                    active={activeTab === 'iac-security'} 
+                    onClick={() => { setActiveTab('iac-security'); setSelectedIncident(null); }} 
+                  />
+                  <SubNavItem 
+                    icon={<DollarSign size={14} />} 
+                    label="Infracost Budget Impact" 
+                    active={activeTab === 'iac-cost'} 
+                    onClick={() => { setActiveTab('iac-cost'); setSelectedIncident(null); }} 
+                  />
+                  <SubNavItem 
+                    icon={<FileCode size={14} />} 
+                    label="IaC Blueprint Library" 
+                    active={activeTab === 'iac-templates'} 
+                    onClick={() => { setActiveTab('iac-templates'); setSelectedIncident(null); }} 
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </nav>
 
         <div className="p-3 mt-auto border-t border-slate-100 bg-slate-50/50 space-y-1">
@@ -1799,13 +1930,41 @@ export default function App() {
                 ? `INCIDENT / ${selectedIncident.id}` 
                 : activeTab === 'dashboard' 
                   ? 'DevSecOps / Active Incidents' 
-                  : activeTab === 'config-management'
-                    ? 'DevOps / Configuration Management'
-                    : activeTab === 'iac'
-                      ? 'DevOps / Infrastructure as Code'
-                      : activeTab === 'data-sources' 
-                        ? 'Data Sources' 
-                        : activeTab.toUpperCase()}
+                  : activeTab === 'log-analyzer'
+                    ? 'DevSecOps / Log Analyzer'
+                    : activeTab === 'history'
+                      ? 'DevSecOps / Investigation History'
+                      : activeTab === 'data-sources'
+                        ? 'DevSecOps / Data Sources'
+                        : activeTab === 'integrations'
+                          ? 'DevSecOps / Integrations'
+                          : activeTab === 'models'
+                            ? 'DevSecOps / Models Info'
+                            : activeTab === 'agents'
+                              ? 'DevSecOps / Autonomous Agents'
+                              : activeTab === 'cm-orchestrator' || activeTab === 'config-management'
+                                ? 'Configuration Management / Ansible Orchestrator'
+                                : activeTab === 'cm-nodes'
+                                  ? 'Configuration Management / Host Inventory & Drift'
+                                  : activeTab === 'cm-manifests'
+                                    ? 'Configuration Management / Playbooks & ConfigMaps'
+                                    : activeTab === 'cm-secrets'
+                                      ? 'Configuration Management / Secrets & Vault'
+                                      : activeTab === 'cm-compliance'
+                                        ? 'Configuration Management / CIS Benchmark Audits'
+                                        : activeTab === 'cm-runs'
+                                          ? 'Configuration Management / Execution Runs'
+                                          : activeTab === 'iac-stacks' || activeTab === 'iac'
+                                            ? 'Infrastructure as Code / Workspaces & Stacks'
+                                            : activeTab === 'iac-plan'
+                                              ? 'Infrastructure as Code / Plan & Execution Engine'
+                                              : activeTab === 'iac-security'
+                                                ? 'Infrastructure as Code / Checkov & Policy Gates'
+                                                : activeTab === 'iac-cost'
+                                                  ? 'Infrastructure as Code / Infracost Budget Impact'
+                                                  : activeTab === 'iac-templates'
+                                                    ? 'Infrastructure as Code / Blueprint Library'
+                                                    : (activeTab as string).toUpperCase()}
             </h1>
           </div>
           <div className="flex items-center gap-6">
@@ -1865,10 +2024,31 @@ export default function App() {
                 agents={agents}
                 onClose={() => setSelectedIncident(null)} 
               />
-            ) : activeTab === 'config-management' ? (
-              <ConfigManagementTab />
-            ) : activeTab === 'iac' ? (
-              <IaCTab />
+            ) : (activeTab.startsWith('cm-') || activeTab === 'config-management') ? (
+              <ConfigManagementTab 
+                initialSubTab={
+                  activeTab === 'cm-nodes' ? 'nodes' :
+                  activeTab === 'cm-manifests' ? 'manifests' :
+                  activeTab === 'cm-secrets' ? 'secrets' :
+                  activeTab === 'cm-compliance' ? 'compliance' :
+                  activeTab === 'cm-runs' ? 'runs' : 'orchestrator'
+                }
+                onSubTabChange={(subTab) => {
+                  setActiveTab(`cm-${subTab}` as any);
+                }}
+              />
+            ) : (activeTab.startsWith('iac-') || activeTab === 'iac') ? (
+              <IaCTab 
+                initialSubTab={
+                  activeTab === 'iac-plan' ? 'plan' :
+                  activeTab === 'iac-security' ? 'security' :
+                  activeTab === 'iac-cost' ? 'cost' :
+                  activeTab === 'iac-templates' ? 'templates' : 'workspaces'
+                }
+                onSubTabChange={(subTab) => {
+                  setActiveTab(subTab === 'workspaces' ? 'iac-stacks' : `iac-${subTab}` as any);
+                }}
+              />
             ) : activeTab === 'dashboard' ? (
               <DashboardTab
                 agents={agents}
