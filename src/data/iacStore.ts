@@ -5,10 +5,81 @@
 
 import { IaCWorkspace, SecurityFinding, IaCTemplate } from '../types/iac';
 
-const STORAGE_KEY_WORKSPACES = 'devsecops_iac_workspaces_v2';
+const STORAGE_KEY_WORKSPACES = 'devsecops_iac_workspaces_v3';
 const STORAGE_KEY_ACTIVE_WORKSPACE = 'devsecops_iac_active_workspace_id';
 
 export const DEFAULT_WORKSPACES: IaCWorkspace[] = [
+  {
+    id: 'ws-postgres-k8s-prod',
+    name: 'onprem-kubernetes-postgres-backend',
+    description: 'Self-hosted Kubernetes bare-metal cluster with remote state stored in enterprise PostgreSQL backend with advisory locking.',
+    environment: 'production',
+    provider: 'Kubernetes',
+    terraformVersion: '1.9.5',
+    executionMode: 'local',
+    stateBackend: {
+      type: 'pg',
+      connStr: 'postgres://tf_state_user:••••••••@postgres-cluster.internal.infra:5432/tf_state_db?sslmode=require',
+      schemaName: 'terraform_remote_states'
+    },
+    gitConfig: {
+      provider: 'gitlab',
+      repoUrl: 'https://gitlab.internal.infra/platform-ops/terraform-onprem-k8s',
+      repoName: 'platform-ops/terraform-onprem-k8s',
+      branch: 'main',
+      workingDirectory: 'clusters/production-dc1',
+      authType: 'deploy_key',
+      sshKeyRef: 'id_ed25519_gitlab_runner',
+      webhookEnabled: true,
+      webhookSecret: 'whsec_pg_98fa012c44',
+      lastCommitHash: 'f1a90c4',
+      lastCommitMessage: 'feat(calico): upgrade BGP mesh and Cilium CNI eBPF tunnels',
+      lastCommitAuthor: 'Core Infrastructure Lead (@devon.v)',
+      lastCommitDate: '1 hour ago',
+      syncStatus: 'synced',
+      lastSyncedAt: '5 minutes ago'
+    },
+    variables: [
+      {
+        id: 'pg-var-1',
+        key: 'control_plane_replicas',
+        value: '3',
+        category: 'terraform',
+        hcl: true,
+        sensitive: false,
+        description: 'HA etcd control plane node count'
+      },
+      {
+        id: 'pg-var-2',
+        key: 'pod_network_cidr',
+        value: '172.24.0.0/16',
+        category: 'terraform',
+        hcl: false,
+        sensitive: false,
+        description: 'Calico CNI overlay network IP pool'
+      },
+      {
+        id: 'pg-var-3',
+        key: 'PG_CONN_STR',
+        value: 'postgres://tf_state_user:secretPassw0rd@postgres-cluster.internal.infra:5432/tf_state_db?sslmode=require',
+        category: 'environment',
+        hcl: false,
+        sensitive: true,
+        description: 'PostgreSQL backend state connection string'
+      }
+    ],
+    isLocked: false,
+    resourceCount: 38,
+    lastPlanStatus: 'success',
+    lastApplied: '1 hour ago',
+    monthlyCost: 480.00,
+    costDelta: 0,
+    autoApply: false,
+    speculativePlans: true,
+    tags: ['kubernetes', 'postgres-backend', 'oss-terraform', 'baremetal', 'on-prem'],
+    createdAt: '2026-06-01T10:00:00Z',
+    updatedAt: '2026-08-23T05:40:00Z'
+  },
   {
     id: 'ws-aws-eks-prod',
     name: 'production-aws-eks-cluster',
@@ -499,6 +570,47 @@ module "eks" {
       ipv4_enabled    = false
       private_network = google_compute_network.vpc.id
       require_ssl     = true
+    }
+  }
+}`
+  },
+  {
+    id: 'tmpl-postgres-backend',
+    title: 'Terraform OSS PostgreSQL Remote State Backend & Locking',
+    provider: 'Kubernetes',
+    framework: 'Terraform',
+    description: 'Standard Terraform Open Source remote state backend hosted in PostgreSQL with native advisory locking and table schemas.',
+    suggestedVariables: [
+      { key: 'postgres_conn_str', defaultValue: 'postgres://tf_user:password@pg.internal:5432/tf_state?sslmode=require', description: 'PostgreSQL Database Connection URI' },
+      { key: 'schema_name', defaultValue: 'terraform_remote_state', description: 'PostgreSQL Schema Name' }
+    ],
+    code: `terraform {
+  required_version = ">= 1.5.0"
+
+  # Standard Terraform Open-Source (OSS) PostgreSQL Remote State Backend
+  backend "pg" {
+    conn_str    = "postgres://tf_user:StrongSecretPassword@postgres-db.internal:5432/terraform_state_db?sslmode=require"
+    schema_name = "terraform_remote_state"
+  }
+
+  required_providers {
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 2.30"
+    }
+  }
+}
+
+provider "kubernetes" {
+  config_path = "~/.kube/config"
+}
+
+resource "kubernetes_namespace" "production" {
+  metadata {
+    name = "production-workloads"
+    labels = {
+      environment = "production"
+      managed_by  = "terraform-oss-postgres-backend"
     }
   }
 }`

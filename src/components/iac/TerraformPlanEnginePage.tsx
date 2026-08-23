@@ -110,24 +110,33 @@ export default function TerraformPlanEnginePage() {
     setIsPlanning(true);
     const time = new Date().toLocaleTimeString();
 
+    const backendDesc = selectedWorkspace.stateBackend.type === 'pg' 
+      ? `pg://${selectedWorkspace.stateBackend.schemaName || 'terraform_remote_state'}`
+      : `${selectedWorkspace.stateBackend.type}://${selectedWorkspace.stateBackend.bucket || 'backend'}`;
+    
+    const lockDesc = selectedWorkspace.stateBackend.type === 'pg'
+      ? `PostgreSQL table "${selectedWorkspace.stateBackend.schemaName || 'terraform_remote_state'}" (Advisory Lock)`
+      : (selectedWorkspace.stateBackend.lockTable || 'state-lock-table');
+
     setTfLogs(prev => [
       ...prev,
       '',
       `--------------------------------------------------------------------------------`,
       `[${time}] $ terraform plan -input=false -compact-warnings`,
-      `Workspace: ${selectedWorkspace.name} | Git Commit: ${selectedWorkspace.gitConfig.lastCommitHash}`,
-      `Evaluating remote state from ${selectedWorkspace.stateBackend.type}://${selectedWorkspace.stateBackend.bucket || 'backend'}...`,
-      `Acquiring state lock on ${selectedWorkspace.stateBackend.lockTable || 'state-lock-table'}... OK`,
+      `Workspace: ${selectedWorkspace.name} (Terraform OSS v${selectedWorkspace.terraformVersion})`,
+      `Git Commit: ${selectedWorkspace.gitConfig.lastCommitHash} on ${selectedWorkspace.gitConfig.branch}`,
+      `Evaluating remote state from ${backendDesc}...`,
+      `Acquiring state lock on ${lockDesc}... OK`,
       `Refreshing Terraform state in memory...`,
-      `Read 48 resources in 2.3s`,
+      `Read ${selectedWorkspace.resourceCount} resources in 2.1s`,
       '',
       `Terraform used selected providers to generate the execution plan:`,
-      `  ~ module.eks.aws_eks_node_group.workers (update in-place)`,
-      `  + module.vpc.aws_subnet.private_subnet_3 (create)`,
+      `  ~ module.compute.workloads (update in-place)`,
+      `  + module.network.ingress_route (create)`,
       '',
       `Plan: 1 to add, 1 to change, 0 to destroy.`,
       `[Infracost] Speculative cost impact: +$34.00/month`,
-      `[Checkov] Scanned 49 resources across 12 files. 0 Critical vulnerabilities detected.`,
+      `[Checkov] Scanned ${selectedWorkspace.resourceCount + 1} resources across 12 files. 0 Critical vulnerabilities detected.`,
       `[${new Date().toLocaleTimeString()}] Plan generated successfully.`
     ]);
 

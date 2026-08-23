@@ -38,10 +38,15 @@ export interface IaCWorkspace {
   name: string;
   description: string;
   environment: 'production' | 'staging' | 'development' | 'sandbox' | 'dr';
-  provider: 'AWS' | 'GCP' | 'Azure' | 'Kubernetes' | 'Multi-Cloud';
+  provider: 'AWS' | 'GCP' | 'Azure' | 'Kubernetes' | 'Multi-Cloud' | 'On-Premise';
   terraformVersion: string; // e.g. "1.9.5", "1.8.5", "OpenTofu 1.8.2"
+  executionMode?: 'local' | 'remote_enterprise' | 'agent_pool'; // local (OSS) vs remote/agent (TFE)
   stateBackend: {
-    type: 's3' | 'gcs' | 'azurerm' | 'remote' | 'http' | 'local';
+    type: 'pg' | 's3' | 'gcs' | 'azurerm' | 'consul' | 'http' | 'local';
+    // PostgreSQL backend fields (Terraform OSS standard)
+    connStr?: string;
+    schemaName?: string;
+    // Object storage / Cloud backend fields
     bucket?: string;
     key?: string;
     region?: string;
