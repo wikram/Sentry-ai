@@ -67,7 +67,11 @@ import PlaybooksConfigPage from './components/config-mgmt/PlaybooksConfigPage';
 import SecretsVaultPage from './components/config-mgmt/SecretsVaultPage';
 import CisCompliancePage from './components/config-mgmt/CisCompliancePage';
 import ExecutionRunsPage from './components/config-mgmt/ExecutionRunsPage';
-import IaCTab from './components/IaCTab';
+import WorkspacesPage from './components/iac/WorkspacesPage';
+import TerraformPlanEnginePage from './components/iac/TerraformPlanEnginePage';
+import SecurityGatesPage from './components/iac/SecurityGatesPage';
+import CostEstimationPage from './components/iac/CostEstimationPage';
+import BlueprintLibraryPage from './components/iac/BlueprintLibraryPage';
 import { NavItem, SubNavItem } from './components/Common';
 
 // Provision to configure backend system URL via environment variable
@@ -2176,18 +2180,20 @@ export default function App() {
               <CisCompliancePage />
             ) : activeTab === 'cm-runs' ? (
               <ExecutionRunsPage />
-            ) : (activeTab.startsWith('iac-') || activeTab === 'iac') ? (
-              <IaCTab 
-                initialSubTab={
-                  activeTab === 'iac-plan' ? 'plan' :
-                  activeTab === 'iac-security' ? 'security' :
-                  activeTab === 'iac-cost' ? 'cost' :
-                  activeTab === 'iac-templates' ? 'templates' : 'workspaces'
-                }
-                onSubTabChange={(subTab) => {
-                  setActiveTab(subTab === 'workspaces' ? 'iac-stacks' : `iac-${subTab}` as any);
-                }}
+            ) : (activeTab === 'iac-stacks' || activeTab === 'iac') ? (
+              <WorkspacesPage 
+                onNavigateToPlan={() => setActiveTab('iac-plan')}
+                onNavigateToSecurity={() => setActiveTab('iac-security')}
+                onNavigateToCost={() => setActiveTab('iac-cost')}
               />
+            ) : activeTab === 'iac-plan' ? (
+              <TerraformPlanEnginePage />
+            ) : activeTab === 'iac-security' ? (
+              <SecurityGatesPage />
+            ) : activeTab === 'iac-cost' ? (
+              <CostEstimationPage />
+            ) : activeTab === 'iac-templates' ? (
+              <BlueprintLibraryPage onSelectBlueprint={() => setActiveTab('iac-stacks')} />
             ) : activeTab === 'dashboard' ? (
               <DashboardTab
                 agents={agents}
