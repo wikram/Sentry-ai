@@ -17,9 +17,7 @@ import {
   CheckCircle2, 
   Loader2,
   X,
-  Filter,
-  SlidersHorizontal,
-  Plus
+  Filter
 } from 'lucide-react';
 import { formatDateTime } from '../lib/dateUtils';
 
@@ -560,393 +558,270 @@ export default function HistoryTab({
         </div>
       </div>
 
-      {/* Control Bar: GCP Console Style Composite Parameter Search Bar with Search Button */}
+      {/* Control Bar: GCP Console Style Composite Parameter Search Bar */}
       <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
-        {/* Search with Parameters Box & Action Button */}
-        <div className="flex-1 flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
-          {/* GCP Filter Bar Container */}
-          <div ref={filterContainerRef} className="relative flex-1">
-            <div 
-              onClick={() => {
-                setIsDropdownOpen(true);
-                if (inputRef.current) inputRef.current.focus();
-              }}
-              className={`min-h-[44px] bg-slate-50 border rounded-xl px-3.5 py-1.5 flex flex-wrap items-center gap-2 cursor-text transition-all ${
-                isDropdownOpen ? 'border-blue-500 ring-2 ring-blue-500/20 bg-white' : 'border-slate-200 hover:border-slate-300'
-              }`}
-            >
-              <Search size={16} className="text-slate-400 shrink-0 mr-0.5" />
+        {/* GCP Filter Bar Container */}
+        <div ref={filterContainerRef} className="relative flex-1">
+          <div 
+            onClick={() => {
+              setIsDropdownOpen(true);
+              if (inputRef.current) inputRef.current.focus();
+            }}
+            className={`min-h-[44px] bg-slate-50 border rounded-xl px-3.5 py-1.5 flex flex-wrap items-center gap-2 cursor-text transition-all ${
+              isDropdownOpen ? 'border-blue-500 ring-2 ring-blue-500/20 bg-white' : 'border-slate-200 hover:border-slate-300'
+            }`}
+          >
+            <Search size={16} className="text-slate-400 shrink-0 mr-0.5" />
 
-              {/* Active Filter Chips */}
-              <AnimatePresence>
-                {activeChips.map((chip) => (
-                  <motion.span
-                    key={chip.id}
-                    initial={{ scale: 0.85, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    exit={{ scale: 0.85, opacity: 0 }}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-900 text-slate-100 rounded-lg text-xs font-semibold shadow-xs shrink-0"
-                  >
-                    <span className="text-slate-400 font-mono text-[10px] font-bold uppercase">{chip.label}:</span>
-                    <span className="font-bold">{chip.value}</span>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeChip(chip.id);
-                      }}
-                      className="hover:bg-slate-700 p-0.5 rounded transition-colors text-slate-400 hover:text-white ml-0.5"
-                      title="Remove filter parameter"
-                    >
-                      <X size={12} />
-                    </button>
-                  </motion.span>
-                ))}
-              </AnimatePresence>
-
-              {/* Active Pending Parameter Prefix */}
-              {selectedPendingKey && (
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-100 text-blue-800 rounded-lg text-xs font-bold font-mono shrink-0 border border-blue-200">
-                  {selectedPendingKey === 'id' ? 'ID' :
-                   selectedPendingKey === 'model' ? 'Model' :
-                   selectedPendingKey === 'status' ? 'Status' : 'Logs'}:
+            {/* Active Filter Chips */}
+            <AnimatePresence>
+              {activeChips.map((chip) => (
+                <motion.span
+                  key={chip.id}
+                  initial={{ scale: 0.85, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.85, opacity: 0 }}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-900 text-slate-100 rounded-lg text-xs font-semibold shadow-xs shrink-0"
+                >
+                  <span className="text-slate-400 font-mono text-[10px] font-bold uppercase">{chip.label}:</span>
+                  <span className="font-bold">{chip.value}</span>
                   <button
+                    type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      setSelectedPendingKey(null);
+                      removeChip(chip.id);
                     }}
-                    className="hover:text-blue-950 p-0.5 ml-0.5"
+                    className="hover:bg-slate-700 p-0.5 rounded transition-colors text-slate-400 hover:text-white ml-0.5"
+                    title="Remove filter parameter"
                   >
-                    <X size={10} />
+                    <X size={12} />
                   </button>
-                </span>
-              )}
+                </motion.span>
+              ))}
+            </AnimatePresence>
 
-              {/* Input Field */}
-              <input
-                ref={inputRef}
-                type="text"
-                value={currentInputValue}
-                onChange={(e) => setCurrentInputValue(e.target.value)}
-                onFocus={() => setIsDropdownOpen(true)}
-                onKeyDown={handleKeyDown}
-                placeholder={
-                  activeChips.length > 0 || selectedPendingKey
-                    ? selectedPendingKey
-                      ? `Enter ${selectedPendingKey} value and click Search or press Enter...`
-                      : 'Search by another parameter...'
-                    : 'Search with parameters (e.g. ID, Model, Status, Logs)...'
-                }
-                className="flex-1 bg-transparent border-none text-xs font-medium focus:outline-none min-w-[150px] py-1 text-slate-800 placeholder:text-slate-400"
-              />
-
-              {/* Clear All Button */}
-              {hasActiveFilters && (
+            {/* Active Pending Parameter Prefix */}
+            {selectedPendingKey && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-100 text-blue-800 rounded-lg text-xs font-bold font-mono shrink-0 border border-blue-200">
+                {selectedPendingKey === 'id' ? 'ID' :
+                 selectedPendingKey === 'model' ? 'Model' :
+                 selectedPendingKey === 'status' ? 'Status' : 'Logs'}:
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    setActiveChips([]);
-                    setCurrentInputValue('');
                     setSelectedPendingKey(null);
                   }}
-                  className="text-xs font-bold text-slate-400 hover:text-rose-600 px-2 py-1 rounded transition-colors shrink-0 ml-auto"
-                  title="Clear all filters"
+                  className="hover:text-blue-950 p-0.5 ml-0.5"
                 >
-                  Clear all
+                  <X size={10} />
                 </button>
-              )}
-            </div>
-
-            {/* GCP-Style Parameter Dropdown Menu */}
-            <AnimatePresence>
-              {isDropdownOpen && (
-                <motion.div
-                  initial={{ opacity: 0, y: 6, scale: 0.98 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 6, scale: 0.98 }}
-                  transition={{ duration: 0.15 }}
-                  className="absolute left-0 top-full mt-1.5 w-full sm:w-80 bg-white border border-slate-200 rounded-2xl shadow-xl z-30 p-2 overflow-hidden"
-                >
-                  <div className="px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 border-b border-slate-100 mb-1 flex items-center justify-between">
-                    <span>Filter by Property</span>
-                    <Filter size={12} className="text-slate-400" />
-                  </div>
-
-                  <div className="space-y-0.5">
-                    {/* Parameter: ID / Code */}
-                    <div
-                      onClick={() => {
-                        setSelectedPendingKey('id');
-                        setIsDropdownOpen(false);
-                        if (inputRef.current) inputRef.current.focus();
-                      }}
-                      className="flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 cursor-pointer transition-colors group"
-                    >
-                      <div className="flex items-center gap-2">
-                        <Terminal size={14} className="text-slate-400 group-hover:text-blue-600" />
-                        <span>ID / Analysis Code</span>
-                      </div>
-                      <span className="text-[10px] font-mono text-slate-400">Type value &crarr;</span>
-                    </div>
-
-                    {/* Parameter: Status */}
-                    <div 
-                      onMouseEnter={() => setHoveredParam('status')}
-                      className="relative"
-                    >
-                      <div
-                        onClick={() => setHoveredParam(hoveredParam === 'status' ? null : 'status')}
-                        className="flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 cursor-pointer transition-colors group"
-                      >
-                        <div className="flex items-center gap-2">
-                          <CheckCircle2 size={14} className="text-slate-400 group-hover:text-blue-600" />
-                          <span>Status</span>
-                        </div>
-                        <ChevronRight size={14} className="text-slate-400 group-hover:text-blue-600" />
-                      </div>
-
-                      {/* Status Submenu Options */}
-                      {hoveredParam === 'status' && (
-                        <div className="ml-4 pl-3 border-l-2 border-blue-100 my-1 space-y-1">
-                          {['COMPLETED', 'RUNNING', 'FAILED'].map(st => (
-                            <div
-                              key={st}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                addChip('status', 'Status', st);
-                              }}
-                              className="px-2.5 py-1.5 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-100 hover:text-slate-900 cursor-pointer transition-all flex items-center gap-2"
-                            >
-                              <span className={`w-2 h-2 rounded-full ${
-                                st === 'COMPLETED' ? 'bg-emerald-500' :
-                                st === 'RUNNING' ? 'bg-blue-500' : 'bg-rose-500'
-                              }`} />
-                              {st}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Parameter: Engine Model */}
-                    <div 
-                      onMouseEnter={() => setHoveredParam('model')}
-                      className="relative"
-                    >
-                      <div
-                        onClick={() => setHoveredParam(hoveredParam === 'model' ? null : 'model')}
-                        className="flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 cursor-pointer transition-colors group"
-                      >
-                        <div className="flex items-center gap-2">
-                          <Cpu size={14} className="text-slate-400 group-hover:text-blue-600" />
-                          <span>LLM Engine Model</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <span className="text-[10px] bg-slate-100 text-slate-500 font-bold px-1.5 py-0.5 rounded-md font-mono">
-                            {(openRouterModels.length > 0 ? openRouterModels : FALLBACK_OPENROUTER_MODELS).length}
-                          </span>
-                          <ChevronRight size={14} className="text-slate-400 group-hover:text-blue-600" />
-                        </div>
-                      </div>
-
-                      {/* Model Submenu Options */}
-                      {hoveredParam === 'model' && (
-                        <div className="ml-2 pl-3 border-l-2 border-blue-100 my-1 space-y-2">
-                          {/* Quick filter input for model catalog */}
-                          <div className="relative my-1 pr-1">
-                            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                            <input
-                              type="text"
-                              value={modelSearchQuery}
-                              onChange={(e) => setModelSearchQuery(e.target.value)}
-                              placeholder="Search OpenRouter models..."
-                              className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-7 pr-2 py-1 text-[11px] font-medium focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-slate-400"
-                              onClick={(e) => e.stopPropagation()}
-                            />
-                          </div>
-
-                          <div className="max-h-56 overflow-y-auto space-y-0.5 pr-1 text-left custom-scrollbar">
-                            {isLoadingModels && openRouterModels.length === 0 ? (
-                              <div className="py-2 text-[11px] text-slate-400 text-center flex items-center justify-center gap-1.5">
-                                <Loader2 size={12} className="animate-spin text-blue-500" />
-                                Loading OpenRouter catalog...
-                              </div>
-                            ) : (
-                              (openRouterModels.length > 0 ? openRouterModels : FALLBACK_OPENROUTER_MODELS)
-                                .filter(m => {
-                                  if (!modelSearchQuery.trim()) return true;
-                                  const q = modelSearchQuery.toLowerCase().trim();
-                                  const nameStr = (m.name || m.label || '').toLowerCase();
-                                  const idStr = (m.id || m.value || '').toLowerCase();
-                                  return nameStr.includes(q) || idStr.includes(q);
-                                })
-                                .map(m => {
-                                  const modelId = m.id || m.value;
-                                  const modelName = m.name || m.label || modelId;
-                                  return (
-                                    <div
-                                      key={modelId}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        addChip('model', 'Model', modelId);
-                                      }}
-                                      className="px-2.5 py-1.5 rounded-lg text-xs hover:bg-blue-50 hover:text-blue-900 cursor-pointer transition-all group flex flex-col gap-0.5"
-                                    >
-                                      <span className="font-bold text-slate-800 group-hover:text-blue-700 text-[11px] leading-tight truncate">
-                                        {modelName}
-                                      </span>
-                                      <span className="font-mono text-[9px] text-slate-400 group-hover:text-blue-500 truncate">
-                                        {modelId}
-                                      </span>
-                                    </div>
-                                  );
-                                })
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Parameter: Log Content */}
-                    <div
-                      onClick={() => {
-                        setSelectedPendingKey('logs');
-                        setIsDropdownOpen(false);
-                        if (inputRef.current) inputRef.current.focus();
-                      }}
-                      className="flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 cursor-pointer transition-colors group"
-                    >
-                      <div className="flex items-center gap-2">
-                        <History size={14} className="text-slate-400 group-hover:text-blue-600" />
-                        <span>Log Content</span>
-                      </div>
-                      <span className="text-[10px] font-mono text-slate-400">Type value &crarr;</span>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-
-          {/* Search Action Button */}
-          <button
-            id="history-search-btn"
-            type="button"
-            onClick={handleSearchSubmit}
-            className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 shrink-0 min-h-[44px]"
-            title="Search with parameters"
-          >
-            <Search size={14} />
-            <span>Search</span>
-          </button>
-        </div>
-
-        {/* Multi-Parameter Quick Composer Bar */}
-        <div className="w-full flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 text-xs">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1 mr-1">
-              <SlidersHorizontal size={12} className="text-slate-400" />
-              <span>Quick add parameter:</span>
-            </span>
-
-            {/* Quick Status Completed */}
-            <button
-              type="button"
-              onClick={() => addChip('status', 'Status', 'COMPLETED')}
-              className={`px-2 py-0.5 rounded-lg text-[11px] font-semibold border transition-all flex items-center gap-1 ${
-                activeChips.some(c => c.key === 'status' && c.value === 'COMPLETED')
-                  ? 'bg-emerald-50 text-emerald-700 border-emerald-300 font-bold'
-                  : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200'
-              }`}
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-              <span>COMPLETED</span>
-            </button>
-
-            {/* Quick Status Failed */}
-            <button
-              type="button"
-              onClick={() => addChip('status', 'Status', 'FAILED')}
-              className={`px-2 py-0.5 rounded-lg text-[11px] font-semibold border transition-all flex items-center gap-1 ${
-                activeChips.some(c => c.key === 'status' && c.value === 'FAILED')
-                  ? 'bg-rose-50 text-rose-700 border-rose-300 font-bold'
-                  : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200'
-              }`}
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-              <span>FAILED</span>
-            </button>
-
-            {/* Quick Status Running */}
-            <button
-              type="button"
-              onClick={() => addChip('status', 'Status', 'RUNNING')}
-              className={`px-2 py-0.5 rounded-lg text-[11px] font-semibold border transition-all flex items-center gap-1 ${
-                activeChips.some(c => c.key === 'status' && c.value === 'RUNNING')
-                  ? 'bg-blue-50 text-blue-700 border-blue-300 font-bold'
-                  : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200'
-              }`}
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-              <span>RUNNING</span>
-            </button>
-
-            {/* Quick Add Model Trigger */}
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedPendingKey('model');
-                setIsDropdownOpen(true);
-                setHoveredParam('model');
-                if (inputRef.current) inputRef.current.focus();
-              }}
-              className="px-2 py-0.5 rounded-lg text-[11px] font-semibold bg-slate-50 text-slate-600 border border-slate-200 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 transition-all flex items-center gap-1"
-            >
-              <Cpu size={11} className="text-slate-400" />
-              <span>+ Model</span>
-            </button>
-
-            {/* Quick Add ID Trigger */}
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedPendingKey('id');
-                setIsDropdownOpen(false);
-                if (inputRef.current) inputRef.current.focus();
-              }}
-              className="px-2 py-0.5 rounded-lg text-[11px] font-semibold bg-slate-50 text-slate-600 border border-slate-200 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 transition-all flex items-center gap-1"
-            >
-              <Terminal size={11} className="text-slate-400" />
-              <span>+ ID / Code</span>
-            </button>
-
-            {/* Quick Add Logs Trigger */}
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedPendingKey('logs');
-                setIsDropdownOpen(false);
-                if (inputRef.current) inputRef.current.focus();
-              }}
-              className="px-2 py-0.5 rounded-lg text-[11px] font-semibold bg-slate-50 text-slate-600 border border-slate-200 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 transition-all flex items-center gap-1"
-            >
-              <History size={11} className="text-slate-400" />
-              <span>+ Logs</span>
-            </button>
-          </div>
-
-          {/* Syntax Hint / Active Filter Summary */}
-          <div className="flex items-center gap-2 text-[11px] text-slate-400">
-            {activeChips.length > 1 ? (
-              <span className="font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
-                {activeChips.length} active parameters applied (AND)
-              </span>
-            ) : (
-              <span className="hidden lg:inline text-slate-400 italic">
-                Tip: Combine multiple parameters like <code className="bg-slate-100 text-slate-600 px-1 py-0.5 rounded text-[10px] font-mono">status:COMPLETED model:gpt-4 logs:error</code>
               </span>
             )}
+
+            {/* Input Field */}
+            <input
+              ref={inputRef}
+              type="text"
+              value={currentInputValue}
+              onChange={(e) => setCurrentInputValue(e.target.value)}
+              onFocus={() => setIsDropdownOpen(true)}
+              onKeyDown={handleKeyDown}
+              placeholder={
+                activeChips.length > 0 || selectedPendingKey
+                  ? selectedPendingKey
+                    ? `Enter ${selectedPendingKey} value and press Enter...`
+                    : 'Filter by another parameter...'
+                  : 'Filter history by parameters (e.g. ID, Model, Status)...'
+              }
+              className="flex-1 bg-transparent border-none text-xs font-medium focus:outline-none min-w-[150px] py-1 text-slate-800 placeholder:text-slate-400"
+            />
+
+            {/* Clear All Button */}
+            {hasActiveFilters && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setActiveChips([]);
+                  setCurrentInputValue('');
+                  setSelectedPendingKey(null);
+                }}
+                className="text-xs font-bold text-slate-400 hover:text-rose-600 px-2 py-1 rounded transition-colors shrink-0 ml-auto"
+                title="Clear all filters"
+              >
+                Clear all
+              </button>
+            )}
           </div>
+
+          {/* GCP-Style Parameter Dropdown Menu */}
+          <AnimatePresence>
+            {isDropdownOpen && (
+              <motion.div
+                initial={{ opacity: 0, y: 6, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 6, scale: 0.98 }}
+                transition={{ duration: 0.15 }}
+                className="absolute left-0 top-full mt-1.5 w-full sm:w-80 bg-white border border-slate-200 rounded-2xl shadow-xl z-30 p-2 overflow-hidden"
+              >
+                <div className="px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 border-b border-slate-100 mb-1 flex items-center justify-between">
+                  <span>Filter by Property</span>
+                  <Filter size={12} className="text-slate-400" />
+                </div>
+
+                <div className="space-y-0.5">
+                  {/* Parameter: ID / Code */}
+                  <div
+                    onClick={() => {
+                      setSelectedPendingKey('id');
+                      setIsDropdownOpen(false);
+                      if (inputRef.current) inputRef.current.focus();
+                    }}
+                    className="flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 cursor-pointer transition-colors group"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Terminal size={14} className="text-slate-400 group-hover:text-blue-600" />
+                      <span>ID / Analysis Code</span>
+                    </div>
+                    <span className="text-[10px] font-mono text-slate-400">Type value &crarr;</span>
+                  </div>
+
+                  {/* Parameter: Status */}
+                  <div 
+                    onMouseEnter={() => setHoveredParam('status')}
+                    className="relative"
+                  >
+                    <div
+                      onClick={() => setHoveredParam(hoveredParam === 'status' ? null : 'status')}
+                      className="flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 cursor-pointer transition-colors group"
+                    >
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 size={14} className="text-slate-400 group-hover:text-blue-600" />
+                        <span>Status</span>
+                      </div>
+                      <ChevronRight size={14} className="text-slate-400 group-hover:text-blue-600" />
+                    </div>
+
+                    {/* Status Submenu Options */}
+                    {hoveredParam === 'status' && (
+                      <div className="ml-4 pl-3 border-l-2 border-blue-100 my-1 space-y-1">
+                        {['COMPLETED', 'RUNNING', 'FAILED'].map(st => (
+                          <div
+                            key={st}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              addChip('status', 'Status', st);
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-100 hover:text-slate-900 cursor-pointer transition-all flex items-center gap-2"
+                          >
+                            <span className={`w-2 h-2 rounded-full ${
+                              st === 'COMPLETED' ? 'bg-emerald-500' :
+                              st === 'RUNNING' ? 'bg-blue-500' : 'bg-rose-500'
+                            }`} />
+                            {st}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Parameter: Engine Model */}
+                  <div 
+                    onMouseEnter={() => setHoveredParam('model')}
+                    className="relative"
+                  >
+                    <div
+                      onClick={() => setHoveredParam(hoveredParam === 'model' ? null : 'model')}
+                      className="flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 cursor-pointer transition-colors group"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Cpu size={14} className="text-slate-400 group-hover:text-blue-600" />
+                        <span>LLM Engine Model</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] bg-slate-100 text-slate-500 font-bold px-1.5 py-0.5 rounded-md font-mono">
+                          {(openRouterModels.length > 0 ? openRouterModels : FALLBACK_OPENROUTER_MODELS).length}
+                        </span>
+                        <ChevronRight size={14} className="text-slate-400 group-hover:text-blue-600" />
+                      </div>
+                    </div>
+
+                    {/* Model Submenu Options */}
+                    {hoveredParam === 'model' && (
+                      <div className="ml-2 pl-3 border-l-2 border-blue-100 my-1 space-y-2">
+                        {/* Quick filter input for model catalog */}
+                        <div className="relative my-1 pr-1">
+                          <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                          <input
+                            type="text"
+                            value={modelSearchQuery}
+                            onChange={(e) => setModelSearchQuery(e.target.value)}
+                            placeholder="Search OpenRouter models..."
+                            className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-7 pr-2 py-1 text-[11px] font-medium focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-slate-400"
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        </div>
+
+                        <div className="max-h-56 overflow-y-auto space-y-0.5 pr-1 text-left custom-scrollbar">
+                          {isLoadingModels && openRouterModels.length === 0 ? (
+                            <div className="py-2 text-[11px] text-slate-400 text-center flex items-center justify-center gap-1.5">
+                              <Loader2 size={12} className="animate-spin text-blue-500" />
+                              Loading OpenRouter catalog...
+                            </div>
+                          ) : (
+                            (openRouterModels.length > 0 ? openRouterModels : FALLBACK_OPENROUTER_MODELS)
+                              .filter(m => {
+                                if (!modelSearchQuery.trim()) return true;
+                                const q = modelSearchQuery.toLowerCase().trim();
+                                const nameStr = (m.name || m.label || '').toLowerCase();
+                                const idStr = (m.id || m.value || '').toLowerCase();
+                                return nameStr.includes(q) || idStr.includes(q);
+                              })
+                              .map(m => {
+                                const modelId = m.id || m.value;
+                                const modelName = m.name || m.label || modelId;
+                                return (
+                                  <div
+                                    key={modelId}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      addChip('model', 'Model', modelId);
+                                    }}
+                                    className="px-2.5 py-1.5 rounded-lg text-xs hover:bg-blue-50 hover:text-blue-900 cursor-pointer transition-all group flex flex-col gap-0.5"
+                                  >
+                                    <span className="font-bold text-slate-800 group-hover:text-blue-700 text-[11px] leading-tight truncate">
+                                      {modelName}
+                                    </span>
+                                    <span className="font-mono text-[9px] text-slate-400 group-hover:text-blue-500 truncate">
+                                      {modelId}
+                                    </span>
+                                  </div>
+                                );
+                              })
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Parameter: Log Content */}
+                  <div
+                    onClick={() => {
+                      setSelectedPendingKey('logs');
+                      setIsDropdownOpen(false);
+                      if (inputRef.current) inputRef.current.focus();
+                    }}
+                    className="flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-blue-50 hover:text-blue-700 cursor-pointer transition-colors group"
+                  >
+                    <div className="flex items-center gap-2">
+                      <History size={14} className="text-slate-400 group-hover:text-blue-600" />
+                      <span>Log Content</span>
+                    </div>
+                    <span className="text-[10px] font-mono text-slate-400">Type value &crarr;</span>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
         {/* Display Choice: 10 / 15 / 20 results per page */}
