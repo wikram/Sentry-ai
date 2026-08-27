@@ -17,7 +17,9 @@ import {
   CheckCircle2, 
   Loader2,
   X,
-  Filter
+  Filter,
+  SlidersHorizontal,
+  Plus
 } from 'lucide-react';
 import { formatDateTime } from '../lib/dateUtils';
 
@@ -248,21 +250,119 @@ export default function HistoryTab({
     setCurrentPage(1);
   }, [activeChips, currentInputValue, selectedPendingKey, pageSize]);
 
-  // Add a filter chip
-  const addChip = (key: 'id' | 'model' | 'status' | 'logs' | 'search', label: string, value: string) => {
-    const trimmedVal = value.trim();
-    if (!trimmedVal) return;
+  // Helper function to parse multiple parameters from a search query
+  const parseMultiParameters = (
+    rawInput: string,
+    pendingKey: 'id' | 'model' | 'status' | 'logs' | null
+  ): Array<{ key: 'id' | 'model' | 'status' | 'logs' | 'search'; label: string; value: string }> => {
+    const trimmed = rawInput.trim();
+    if (!trimmed) return [];
 
-    // Avoid duplicate identical chips
-    const exists = activeChips.some(c => c.key === key && c.value.toLowerCase() === trimmedVal.toLowerCase());
-    if (!exists) {
-      setActiveChips(prev => [...prev, {
-        id: `${key}-${trimmedVal}-${Date.now()}`,
-        key,
-        label,
-        value: trimmedVal
-      }]);
+    // If a pending key is explicitly selected (e.g. user clicked Status/Model/ID/Logs in dropdown)
+    if (pendingKey) {
+      const label =
+        pendingKey === 'id' ? 'ID' :
+        pendingKey === 'model' ? 'Model' :
+        pendingKey === 'status' ? 'Status' :
+        pendingKey === 'logs' ? 'Logs' : 'Search';
+
+      // Support comma-separated multiple values for the same pending key (e.g., "COMPLETED, FAILED")
+      const parts = trimmed.split(',').map(s => s.trim()).filter(Boolean);
+      if (parts.length > 1) {
+        return parts.map(p => ({ key: pendingKey, label, value: p }));
+      }
+      return [{ key: pendingKey, label, value: trimmed }];
     }
+
+    // Check if string contains key:value or key=value patterns
+    // Supported keys: id, code, model, engine, status, log, logs, search
+    const keyValRegex = /(?:(\b(?:id|code|model|engine|status|log|logs|search)\b)[:=](?:"([^"]+)"|'([^']+)'|([^\s,]+)))/gi;
+    
+    const results: Array<{ key: 'id' | 'model' | 'status' | 'logs' | 'search'; label: string; value: string }> = [];
+    let match: RegExpExecArray | null;
+    let hasKeyValMatches = false;
+
+    while ((match = keyValRegex.exec(trimmed)) !== null) {
+      hasKeyValMatches = true;
+      const rawKey = match[1].toLowerCase();
+      const val = match[2] || match[3] || match[4];
+      if (val && val.trim()) {
+        let key: 'id' | 'model' | 'status' | 'logs' | 'search' = 'search';
+        let label = 'Search';
+        if (rawKey === 'id' || rawKey === 'code') {
+          key = 'id';
+          label = 'ID';
+        } else if (rawKey === 'model' || rawKey === 'engine') {
+          key = 'model';
+          label = 'Model';
+        } else if (rawKey === 'status') {
+          key = 'status';
+          label = 'Status';
+        } else if (rawKey === 'log' || rawKey === 'logs') {
+          key = 'logs';
+          label = 'Logs';
+        }
+        results.push({ key, label, value: val.trim() });
+      }
+    }
+
+    if (hasKeyValMatches) {
+      // Extract any remaining free text terms not covered by key:value pairs
+      const stripped = trimmed.replace(keyValRegex, '').trim();
+      if (stripped) {
+        const freeTokens = stripped.split(/[,]+/).map(s => s.trim()).filter(Boolean);
+        freeTokens.forEach(token => {
+          if (token) {
+            results.push({ key: 'search', label: 'Search', value: token });
+          }
+        });
+      }
+      return results;
+    }
+
+    // If no explicit key:value pattern, check if comma-separated
+    if (trimmed.includes(',')) {
+      const commaParts = trimmed.split(',').map(s => s.trim()).filter(Boolean);
+      return commaParts.map(part => {
+        const upper = part.toUpperCase();
+        if (upper === 'COMPLETED' || upper === 'RUNNING' || upper === 'FAILED') {
+          return { key: 'status', label: 'Status', value: upper };
+        }
+        return { key: 'search', label: 'Search', value: part };
+      });
+    }
+
+    // Check if single term matches a known status keyword
+    const upper = trimmed.toUpperCase();
+    if (upper === 'COMPLETED' || upper === 'RUNNING' || upper === 'FAILED') {
+      return [{ key: 'status', label: 'Status', value: upper }];
+    }
+
+    // Default to general search token
+    return [{ key: 'search', label: 'Search', value: trimmed }];
+  };
+
+  // Add multiple filter chips at once
+  const addMultipleChips = (chipsToAdd: Array<{ key: 'id' | 'model' | 'status' | 'logs' | 'search'; label: string; value: string }>) => {
+    if (!chipsToAdd || chipsToAdd.length === 0) return;
+
+    setActiveChips(prev => {
+      let updated = [...prev];
+      for (const item of chipsToAdd) {
+        const trimmedVal = item.value.trim();
+        if (!trimmedVal) continue;
+        const exists = updated.some(c => c.key === item.key && c.value.toLowerCase() === trimmedVal.toLowerCase());
+        if (!exists) {
+          updated.push({
+            id: `${item.key}-${trimmedVal}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            key: item.key,
+            label: item.label,
+            value: trimmedVal
+          });
+        }
+      }
+      return updated;
+    });
 
     setCurrentInputValue('');
     setSelectedPendingKey(null);
@@ -270,16 +370,16 @@ export default function HistoryTab({
     setHoveredParam(null);
   };
 
-  // Explicit Search submit handler
+  // Add a single filter chip
+  const addChip = (key: 'id' | 'model' | 'status' | 'logs' | 'search', label: string, value: string) => {
+    addMultipleChips([{ key, label, value }]);
+  };
+
+  // Explicit Search submit handler (supports multiple parameters)
   const handleSearchSubmit = () => {
     if (currentInputValue.trim()) {
-      const key = selectedPendingKey || 'search';
-      const label = 
-        key === 'id' ? 'ID' :
-        key === 'model' ? 'Model' :
-        key === 'status' ? 'Status' :
-        key === 'logs' ? 'Logs' : 'Search';
-      addChip(key, label, currentInputValue);
+      const parsed = parseMultiParameters(currentInputValue, selectedPendingKey);
+      addMultipleChips(parsed);
     }
     setIsDropdownOpen(false);
     setHoveredParam(null);
@@ -295,13 +395,8 @@ export default function HistoryTab({
     if (e.key === 'Enter') {
       e.preventDefault();
       if (currentInputValue.trim()) {
-        const key = selectedPendingKey || 'search';
-        const label = 
-          key === 'id' ? 'ID' :
-          key === 'model' ? 'Model' :
-          key === 'status' ? 'Status' :
-          key === 'logs' ? 'Logs' : 'Search';
-        addChip(key, label, currentInputValue);
+        const parsed = parseMultiParameters(currentInputValue, selectedPendingKey);
+        addMultipleChips(parsed);
       }
     } else if (e.key === 'Backspace' && currentInputValue === '') {
       if (selectedPendingKey) {
@@ -323,33 +418,61 @@ export default function HistoryTab({
       const output = (item.output || '').toLowerCase();
       const createdAt = (item.created_at || item.timestamp || '').toLowerCase();
 
-      // Must match ALL active chips (AND logic)
-      for (const chip of activeChips) {
-        const val = chip.value.toLowerCase().trim();
-        if (!val) continue;
+      // Group active chips by parameter category
+      const statusChips = activeChips.filter(c => c.key === 'status');
+      const modelChips = activeChips.filter(c => c.key === 'model');
+      const idChips = activeChips.filter(c => c.key === 'id');
+      const logsChips = activeChips.filter(c => c.key === 'logs');
+      const searchChips = activeChips.filter(c => c.key === 'search');
 
-        if (chip.key === 'status') {
-          if (status !== val) return false;
-        } else if (chip.key === 'model') {
-          if (!model.includes(val)) return false;
-        } else if (chip.key === 'id') {
-          if (!id.includes(val) && !code.includes(val)) return false;
-        } else if (chip.key === 'logs') {
-          if (!input.includes(val) && !output.includes(val)) return false;
-        } else if (chip.key === 'search') {
-          const matchesAny =
+      // 1. Status check (OR match among status chips)
+      if (statusChips.length > 0) {
+        const matchesStatus = statusChips.some(c => status === c.value.toLowerCase().trim());
+        if (!matchesStatus) return false;
+      }
+
+      // 2. Model check (OR match among model chips)
+      if (modelChips.length > 0) {
+        const matchesModel = modelChips.some(c => model.includes(c.value.toLowerCase().trim()));
+        if (!matchesModel) return false;
+      }
+
+      // 3. ID / Code check (OR match among ID chips)
+      if (idChips.length > 0) {
+        const matchesId = idChips.some(c => {
+          const val = c.value.toLowerCase().trim();
+          return id.includes(val) || code.includes(val);
+        });
+        if (!matchesId) return false;
+      }
+
+      // 4. Logs check (AND match among log chips)
+      if (logsChips.length > 0) {
+        const matchesLogs = logsChips.every(c => {
+          const val = c.value.toLowerCase().trim();
+          return input.includes(val) || output.includes(val);
+        });
+        if (!matchesLogs) return false;
+      }
+
+      // 5. Free Search check (AND match among general search chips)
+      if (searchChips.length > 0) {
+        const matchesSearch = searchChips.every(c => {
+          const val = c.value.toLowerCase().trim();
+          return (
             id.includes(val) ||
             code.includes(val) ||
             model.includes(val) ||
             status.includes(val) ||
             input.includes(val) ||
             output.includes(val) ||
-            createdAt.includes(val);
-          if (!matchesAny) return false;
-        }
+            createdAt.includes(val)
+          );
+        });
+        if (!matchesSearch) return false;
       }
 
-      // Also filter by active typing in input field
+      // 6. Active typing live filter (if user is currently typing in input box)
       const pendingVal = currentInputValue.toLowerCase().trim();
       if (pendingVal) {
         if (selectedPendingKey === 'status') {
@@ -361,15 +484,38 @@ export default function HistoryTab({
         } else if (selectedPendingKey === 'logs') {
           if (!input.includes(pendingVal) && !output.includes(pendingVal)) return false;
         } else {
-          const matchesAny =
-            id.includes(pendingVal) ||
-            code.includes(pendingVal) ||
-            model.includes(pendingVal) ||
-            status.includes(pendingVal) ||
-            input.includes(pendingVal) ||
-            output.includes(pendingVal) ||
-            createdAt.includes(pendingVal);
-          if (!matchesAny) return false;
+          // If typed text contains key:value prefixes, parse temporarily to filter live
+          if (pendingVal.includes(':') || pendingVal.includes('=')) {
+            const tempParsed = parseMultiParameters(pendingVal, null);
+            for (const p of tempParsed) {
+              const pVal = p.value.toLowerCase();
+              if (p.key === 'status' && status !== pVal) return false;
+              if (p.key === 'model' && !model.includes(pVal)) return false;
+              if (p.key === 'id' && !id.includes(pVal) && !code.includes(pVal)) return false;
+              if (p.key === 'logs' && !input.includes(pVal) && !output.includes(pVal)) return false;
+              if (p.key === 'search') {
+                const matchesAny =
+                  id.includes(pVal) ||
+                  code.includes(pVal) ||
+                  model.includes(pVal) ||
+                  status.includes(pVal) ||
+                  input.includes(pVal) ||
+                  output.includes(pVal) ||
+                  createdAt.includes(pVal);
+                if (!matchesAny) return false;
+              }
+            }
+          } else {
+            const matchesAny =
+              id.includes(pendingVal) ||
+              code.includes(pendingVal) ||
+              model.includes(pendingVal) ||
+              status.includes(pendingVal) ||
+              input.includes(pendingVal) ||
+              output.includes(pendingVal) ||
+              createdAt.includes(pendingVal);
+            if (!matchesAny) return false;
+          }
         }
       }
 
@@ -693,6 +839,114 @@ export default function HistoryTab({
             <Search size={14} />
             <span>Search</span>
           </button>
+        </div>
+
+        {/* Multi-Parameter Quick Composer Bar */}
+        <div className="w-full flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100 text-xs">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1 mr-1">
+              <SlidersHorizontal size={12} className="text-slate-400" />
+              <span>Quick add parameter:</span>
+            </span>
+
+            {/* Quick Status Completed */}
+            <button
+              type="button"
+              onClick={() => addChip('status', 'Status', 'COMPLETED')}
+              className={`px-2 py-0.5 rounded-lg text-[11px] font-semibold border transition-all flex items-center gap-1 ${
+                activeChips.some(c => c.key === 'status' && c.value === 'COMPLETED')
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-300 font-bold'
+                  : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200'
+              }`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              <span>COMPLETED</span>
+            </button>
+
+            {/* Quick Status Failed */}
+            <button
+              type="button"
+              onClick={() => addChip('status', 'Status', 'FAILED')}
+              className={`px-2 py-0.5 rounded-lg text-[11px] font-semibold border transition-all flex items-center gap-1 ${
+                activeChips.some(c => c.key === 'status' && c.value === 'FAILED')
+                  ? 'bg-rose-50 text-rose-700 border-rose-300 font-bold'
+                  : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200'
+              }`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+              <span>FAILED</span>
+            </button>
+
+            {/* Quick Status Running */}
+            <button
+              type="button"
+              onClick={() => addChip('status', 'Status', 'RUNNING')}
+              className={`px-2 py-0.5 rounded-lg text-[11px] font-semibold border transition-all flex items-center gap-1 ${
+                activeChips.some(c => c.key === 'status' && c.value === 'RUNNING')
+                  ? 'bg-blue-50 text-blue-700 border-blue-300 font-bold'
+                  : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200'
+              }`}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+              <span>RUNNING</span>
+            </button>
+
+            {/* Quick Add Model Trigger */}
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedPendingKey('model');
+                setIsDropdownOpen(true);
+                setHoveredParam('model');
+                if (inputRef.current) inputRef.current.focus();
+              }}
+              className="px-2 py-0.5 rounded-lg text-[11px] font-semibold bg-slate-50 text-slate-600 border border-slate-200 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 transition-all flex items-center gap-1"
+            >
+              <Cpu size={11} className="text-slate-400" />
+              <span>+ Model</span>
+            </button>
+
+            {/* Quick Add ID Trigger */}
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedPendingKey('id');
+                setIsDropdownOpen(false);
+                if (inputRef.current) inputRef.current.focus();
+              }}
+              className="px-2 py-0.5 rounded-lg text-[11px] font-semibold bg-slate-50 text-slate-600 border border-slate-200 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 transition-all flex items-center gap-1"
+            >
+              <Terminal size={11} className="text-slate-400" />
+              <span>+ ID / Code</span>
+            </button>
+
+            {/* Quick Add Logs Trigger */}
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedPendingKey('logs');
+                setIsDropdownOpen(false);
+                if (inputRef.current) inputRef.current.focus();
+              }}
+              className="px-2 py-0.5 rounded-lg text-[11px] font-semibold bg-slate-50 text-slate-600 border border-slate-200 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 transition-all flex items-center gap-1"
+            >
+              <History size={11} className="text-slate-400" />
+              <span>+ Logs</span>
+            </button>
+          </div>
+
+          {/* Syntax Hint / Active Filter Summary */}
+          <div className="flex items-center gap-2 text-[11px] text-slate-400">
+            {activeChips.length > 1 ? (
+              <span className="font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
+                {activeChips.length} active parameters applied (AND)
+              </span>
+            ) : (
+              <span className="hidden lg:inline text-slate-400 italic">
+                Tip: Combine multiple parameters like <code className="bg-slate-100 text-slate-600 px-1 py-0.5 rounded text-[10px] font-mono">status:COMPLETED model:gpt-4 logs:error</code>
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Display Choice: 10 / 15 / 20 results per page */}
