@@ -83,7 +83,7 @@ export default function Login({ onLogin }: LoginProps) {
       }
     } catch (err) {
       console.error('Login request failed:', err);
-      setErrorMsg('Network error. Unable to authorize connection.');
+      setErrorMsg('Network error. Unable to log in.');
     } finally {
       setIsSubmitting(false);
     }
@@ -194,7 +194,7 @@ export default function Login({ onLogin }: LoginProps) {
             disabled={isSubmitting}
             className="w-full py-4 bg-slate-900 text-white rounded-2xl text-xs font-bold uppercase tracking-[0.25em] shadow-xl shadow-slate-900/20 hover:bg-slate-800 transition-all active:scale-[0.98] flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isSubmitting ? 'Authorizing...' : 'Authorize Connection'} <LogIn size={16} />
+            {isSubmitting ? 'Logging in...' : 'Login'} <LogIn size={16} />
           </button>
         </form>
 
