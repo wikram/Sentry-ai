@@ -165,6 +165,7 @@ export default function HistoryTab({
 
   // Local expanded item state fallback
   const [localExpandedId, setLocalExpandedId] = useState<string | null>(null);
+  const [fetchingAnalysisCode, setFetchingAnalysisCode] = useState<string | null>(null);
 
   const activeExpandedId = propExpandedId !== undefined ? propExpandedId : localExpandedId;
   const toggleExpand = (id: string) => {
@@ -174,6 +175,111 @@ export default function HistoryTab({
     } else {
       setLocalExpandedId(nextId);
     }
+  };
+
+  const fetchLogAnalysis = async (analysisCode: string, item: HistoryItem) => {
+    try {
+      setFetchingAnalysisCode(analysisCode);
+      console.log(`[HistoryTab] Calling /api/log-analysis with p_analysis_code="${analysisCode}"`);
+
+      const base = preferredBackendUrl 
+        ? `${preferredBackendUrl.replace(/\/$/, '')}/api/log-analysis` 
+        : '/api/log-analysis';
+      const endpoint = `${base}?p_analysis_code=${encodeURIComponent(analysisCode)}`;
+
+      let response: Response;
+      try {
+        response = await fetch(endpoint, {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' }
+        });
+      } catch (directErr) {
+        if (preferredBackendUrl) {
+          console.warn('[HistoryTab] Direct fetch to preferredBackendUrl failed, falling back to /api/log-analysis:', directErr);
+          response = await fetch(`/api/log-analysis?p_analysis_code=${encodeURIComponent(analysisCode)}`, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' }
+          });
+        } else {
+          throw directErr;
+        }
+      }
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`[HistoryTab] Received /api/log-analysis response for ${analysisCode}:`, data);
+
+        const recordData = data.data || data.record || data;
+        if (recordData) {
+          setHistoryList(prevList => prevList.map(h => {
+            const isMatch = (h.analysis_code === analysisCode) || 
+                            (h.id === item.id) ||
+                            (h.analysis_code === item.analysis_code) ||
+                            (h.id === analysisCode);
+            if (isMatch) {
+              return {
+                ...h,
+                analysis_code: recordData.analysis_code || h.analysis_code || analysisCode,
+                status: recordData.status || h.status,
+                engine_llm_model: recordData.engine_llm_model || recordData.model || h.engine_llm_model,
+                input: recordData.input !== undefined ? recordData.input : h.input,
+                output: recordData.output !== undefined ? recordData.output : (recordData.report !== undefined ? recordData.report : h.output),
+                input_char_count: recordData.input_char_count !== undefined ? recordData.input_char_count : h.input_char_count,
+                completed_at: recordData.completed_at || h.completed_at
+              };
+            }
+            return h;
+          }));
+
+          if (setAnalysisHistory && analysisHistory) {
+            const updated = analysisHistory.map(h => {
+              const isMatch = (h.analysis_code === analysisCode) || 
+                              (h.id === item.id) ||
+                              (h.analysis_code === item.analysis_code) ||
+                              (h.id === analysisCode);
+              if (isMatch) {
+                return {
+                  ...h,
+                  analysis_code: recordData.analysis_code || h.analysis_code || analysisCode,
+                  status: recordData.status || h.status,
+                  engine_llm_model: recordData.engine_llm_model || recordData.model || h.engine_llm_model,
+                  input: recordData.input !== undefined ? recordData.input : h.input,
+                  output: recordData.output !== undefined ? recordData.output : (recordData.report !== undefined ? recordData.report : h.output)
+                };
+              }
+              return h;
+            });
+            setAnalysisHistory(updated);
+          }
+        }
+      } else {
+        console.warn(`[HistoryTab] /api/log-analysis returned HTTP ${response.status}`);
+      }
+    } catch (err) {
+      console.error(`[HistoryTab] Error calling /api/log-analysis for ${analysisCode}:`, err);
+    } finally {
+      setFetchingAnalysisCode(null);
+    }
+  };
+
+  const handleResultClick = (item: HistoryItem, displayCode: string) => {
+    // Determine the analysis code guaranteed to start with ANL-
+    let analysisCode = item.analysis_code || '';
+    if (!analysisCode.startsWith('ANL-')) {
+      if (item.id && typeof item.id === 'string' && item.id.startsWith('ANL-')) {
+        analysisCode = item.id;
+      } else if (displayCode && displayCode.startsWith('ANL-')) {
+        analysisCode = displayCode;
+      } else {
+        analysisCode = `ANL-${item.analysis_code || item.id || Date.now()}`;
+      }
+    }
+
+    // Toggle item expansion
+    toggleExpand(item.id || displayCode);
+
+    // Call /api/log-analysis passing analysis_code starting with ANL- as a parameter
+    fetchLogAnalysis(analysisCode, item);
   };
 
   const fetchHistoryFromApi = async () => {
@@ -895,7 +1001,7 @@ export default function HistoryTab({
                 }`}
               >
                 <button 
-                  onClick={() => toggleExpand(item.id || displayCode)}
+                  onClick={() => handleResultClick(item, displayCode)}
                   className="w-full px-6 py-5 flex items-center justify-between text-left group"
                 >
                   <div className="flex items-center gap-5">
@@ -918,6 +1024,13 @@ export default function HistoryTab({
                           <Cpu size={10} className="text-slate-400" />
                           {displayModel}
                         </span>
+
+                        {fetchingAnalysisCode === (item.analysis_code || displayCode) && (
+                          <span className="px-2 py-0.5 bg-blue-50 text-blue-600 rounded text-[9px] font-bold border border-blue-200 flex items-center gap-1 animate-pulse">
+                            <Loader2 size={10} className="animate-spin text-blue-600" />
+                            Loading API...
+                          </span>
+                        )}
                       </div>
 
                       <div className="flex flex-wrap items-center gap-3 text-[11px] font-medium text-slate-400 uppercase tracking-widest">
