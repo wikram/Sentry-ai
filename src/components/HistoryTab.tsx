@@ -177,6 +177,23 @@ export default function HistoryTab({
     }
   };
 
+  // Helper to ensure analysis job status is COMPLETED, RUNNING, or FAILED (never API envelope 'success')
+  const resolveValidStatus = (newStatus?: string, currentStatus?: string): string => {
+    const current = currentStatus || 'COMPLETED';
+    if (!newStatus || typeof newStatus !== 'string') return current;
+    const trimmed = newStatus.trim();
+    const lower = trimmed.toLowerCase();
+    // "success", "successful", "ok", "true" are HTTP/API envelope responses, not analysis job statuses
+    if (lower === 'success' || lower === 'successful' || lower === 'ok' || lower === 'true') {
+      return (current.toLowerCase() !== 'success' && current.toLowerCase() !== 'ok') ? current : 'COMPLETED';
+    }
+    const upper = trimmed.toUpperCase();
+    if (upper === 'COMPLETED' || upper === 'RUNNING' || upper === 'FAILED') {
+      return upper;
+    }
+    return current;
+  };
+
   const fetchLogAnalysis = async (analysisCode: string, item: HistoryItem) => {
     try {
       setFetchingAnalysisCode(analysisCode);
@@ -209,7 +226,7 @@ export default function HistoryTab({
         const data = await response.json();
         console.log(`[HistoryTab] Received /api/log-analysis response for ${analysisCode}:`, data);
 
-        const recordData = data.data || data.record || data;
+        const recordData = data.data || data.record || data.analysis || data.result || data;
         if (recordData) {
           setHistoryList(prevList => prevList.map(h => {
             const isMatch = (h.analysis_code === analysisCode) || 
@@ -217,10 +234,13 @@ export default function HistoryTab({
                             (h.analysis_code === item.analysis_code) ||
                             (h.id === analysisCode);
             if (isMatch) {
+              const candidateStatus = (data.record?.status) || (data.data?.status) || recordData.status;
+              const finalStatus = resolveValidStatus(candidateStatus, h.status);
+
               return {
                 ...h,
                 analysis_code: recordData.analysis_code || h.analysis_code || analysisCode,
-                status: recordData.status || h.status,
+                status: finalStatus,
                 engine_llm_model: recordData.engine_llm_model || recordData.model || h.engine_llm_model,
                 input: recordData.input !== undefined ? recordData.input : h.input,
                 output: recordData.output !== undefined ? recordData.output : (recordData.report !== undefined ? recordData.report : h.output),
@@ -238,10 +258,13 @@ export default function HistoryTab({
                               (h.analysis_code === item.analysis_code) ||
                               (h.id === analysisCode);
               if (isMatch) {
+                const candidateStatus = (data.record?.status) || (data.data?.status) || recordData.status;
+                const finalStatus = resolveValidStatus(candidateStatus, h.status);
+
                 return {
                   ...h,
                   analysis_code: recordData.analysis_code || h.analysis_code || analysisCode,
-                  status: recordData.status || h.status,
+                  status: finalStatus,
                   engine_llm_model: recordData.engine_llm_model || recordData.model || h.engine_llm_model,
                   input: recordData.input !== undefined ? recordData.input : h.input,
                   output: recordData.output !== undefined ? recordData.output : (recordData.report !== undefined ? recordData.report : h.output)
@@ -517,7 +540,7 @@ export default function HistoryTab({
       const id = (item.id || '').toLowerCase();
       const code = (item.analysis_code || '').toLowerCase();
       const model = (item.engine_llm_model || '').toLowerCase();
-      const status = (item.status || '').toLowerCase();
+      const status = resolveValidStatus(item.status, 'COMPLETED').toLowerCase();
       const input = (item.input || '').toLowerCase();
       const output = (item.output || '').toLowerCase();
       const createdAt = (item.created_at || item.timestamp || '').toLowerCase();
@@ -985,7 +1008,7 @@ export default function HistoryTab({
         <div className="space-y-3">
           {currentPaginatedItems.map((item, idx) => {
             const displayCode = item.analysis_code || item.id || `ANL-${idx + 1}`;
-            const displayStatus = item.status || 'COMPLETED';
+            const displayStatus = resolveValidStatus(item.status, 'COMPLETED');
             const displayModel = item.engine_llm_model || 'openai/gpt-4o';
             const displayCharCount = item.input_char_count !== undefined 
               ? item.input_char_count 

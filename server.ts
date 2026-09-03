@@ -1600,7 +1600,7 @@ const initialAnalysisHistory: any[] = [
 
       if (record) {
         return res.json({
-          status: "success",
+          status: record.status || "COMPLETED",
           analysis_code: record.analysis_code || cleanCode,
           record: record,
           ...record
@@ -1609,7 +1609,7 @@ const initialAnalysisHistory: any[] = [
 
       // Return structured response for the requested code
       return res.json({
-        status: "success",
+        status: "COMPLETED",
         analysis_code: cleanCode || `ANL-${Date.now()}`,
         message: `Log analysis details for ${cleanCode}`,
         record: {
