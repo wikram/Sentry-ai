@@ -17,7 +17,9 @@ import {
   CheckCircle2, 
   Loader2,
   X,
-  Filter
+  Filter,
+  Copy,
+  RotateCw
 } from 'lucide-react';
 import { formatDateTime } from '../lib/dateUtils';
 
@@ -33,6 +35,137 @@ export interface HistoryItem {
   input?: string;
   output?: string;
 }
+
+export interface ExtractedAnalysisData {
+  input: string;
+  output: string;
+  status: string;
+  model: string;
+  analysisCode: string;
+  completedAt: string;
+  inputCharCount: number;
+}
+
+export const extractAnalysisResponse = (raw: any): ExtractedAnalysisData => {
+  if (!raw) {
+    return { input: '', output: '', status: 'COMPLETED', model: '', analysisCode: '', completedAt: '', inputCharCount: 0 };
+  }
+
+  // 1. Unwrap common response envelopes
+  let obj = raw;
+  if (Array.isArray(obj)) {
+    obj = obj[0] || {};
+  } else if (typeof obj === 'object') {
+    if (Array.isArray(obj.data) && obj.data.length > 0) obj = obj.data[0];
+    else if (Array.isArray(obj.record) && obj.record.length > 0) obj = obj.record[0];
+    else if (Array.isArray(obj.records) && obj.records.length > 0) obj = obj.records[0];
+    else if (Array.isArray(obj.history) && obj.history.length > 0) obj = obj.history[0];
+    else if (Array.isArray(obj.results) && obj.results.length > 0) obj = obj.results[0];
+    else if (obj.data && typeof obj.data === 'object' && !Array.isArray(obj.data)) obj = obj.data;
+    else if (obj.record && typeof obj.record === 'object' && !Array.isArray(obj.record)) obj = obj.record;
+    else if (obj.result && typeof obj.result === 'object' && !Array.isArray(obj.result)) obj = obj.result;
+    else if (obj.analysis && typeof obj.analysis === 'object' && !Array.isArray(obj.analysis)) obj = obj.analysis;
+  }
+
+  // 2. Resolve input from all possible field names
+  const rawInput = 
+    obj.input ??
+    obj.raw_logs ??
+    obj.raw_log ??
+    obj.raw_input ??
+    obj.input_logs ??
+    obj.input_log ??
+    obj.logs ??
+    obj.log ??
+    obj.log_data ??
+    obj.log_text ??
+    obj.logContent ??
+    obj.content ??
+    obj.raw ??
+    obj.p_input ??
+    obj.query ??
+    obj.prompt ??
+    raw.input ??
+    raw.raw_logs ??
+    raw.input_logs ??
+    raw.logs ??
+    raw.log_data;
+
+  // 3. Resolve output from all possible field names
+  let rawOutput = 
+    obj.output ??
+    obj.report ??
+    obj.intelligence_report ??
+    obj.analysis_report ??
+    obj.rca_report ??
+    obj.rca_analysis ??
+    obj.findings ??
+    obj.summary ??
+    obj.analysis_output ??
+    obj.result_output ??
+    (typeof obj.analysis === 'string' ? obj.analysis : undefined) ??
+    (typeof obj.result === 'string' ? obj.result : undefined) ??
+    obj.response ??
+    obj.message ??
+    raw.output ??
+    raw.report ??
+    raw.intelligence_report ??
+    raw.summary ??
+    (typeof raw.analysis === 'string' ? raw.analysis : undefined) ??
+    (typeof raw.result === 'string' ? raw.result : undefined);
+
+  if (rawOutput === undefined) {
+    if (obj.analysis && typeof obj.analysis === 'object') {
+      rawOutput = obj.analysis.report || obj.analysis.output || obj.analysis.summary || obj.analysis;
+    } else if (obj.result && typeof obj.result === 'object') {
+      rawOutput = obj.result.report || obj.result.output || obj.result.summary || obj.result;
+    }
+  }
+
+  // Format string for input
+  let formattedInput = '';
+  if (rawInput !== undefined && rawInput !== null) {
+    if (typeof rawInput === 'string') {
+      formattedInput = rawInput;
+    } else if (Array.isArray(rawInput)) {
+      formattedInput = rawInput.map(item => typeof item === 'object' ? JSON.stringify(item) : String(item)).join('\n');
+    } else if (typeof rawInput === 'object') {
+      formattedInput = JSON.stringify(rawInput, null, 2);
+    } else {
+      formattedInput = String(rawInput);
+    }
+  }
+
+  // Format string for output
+  let formattedOutput = '';
+  if (rawOutput !== undefined && rawOutput !== null) {
+    if (typeof rawOutput === 'string') {
+      formattedOutput = rawOutput;
+    } else if (Array.isArray(rawOutput)) {
+      formattedOutput = rawOutput.map(item => typeof item === 'object' ? JSON.stringify(item, null, 2) : String(item)).join('\n\n');
+    } else if (typeof rawOutput === 'object') {
+      formattedOutput = JSON.stringify(rawOutput, null, 2);
+    } else {
+      formattedOutput = String(rawOutput);
+    }
+  }
+
+  const analysisCode = String(obj.analysis_code || raw.analysis_code || '').trim();
+  const status = String(obj.status || raw.status || 'COMPLETED').trim();
+  const model = String(obj.engine_llm_model || obj.model || raw.engine_llm_model || raw.model || '').trim();
+  const completedAt = String(obj.completed_at || raw.completed_at || '').trim();
+  const inputCharCount = Number(obj.input_char_count || raw.input_char_count || (formattedInput ? formattedInput.length : 0));
+
+  return {
+    input: formattedInput,
+    output: formattedOutput,
+    status,
+    model,
+    analysisCode,
+    completedAt,
+    inputCharCount
+  };
+};
 
 export interface FilterChip {
   id: string;
@@ -166,10 +299,18 @@ export default function HistoryTab({
   // Local expanded item state fallback
   const [localExpandedId, setLocalExpandedId] = useState<string | null>(null);
   const [fetchingAnalysisCode, setFetchingAnalysisCode] = useState<string | null>(null);
+  const [detailsMap, setDetailsMap] = useState<Record<string, ExtractedAnalysisData>>({});
+  const [rawViewMap, setRawViewMap] = useState<Record<string, boolean>>({});
 
   const activeExpandedId = propExpandedId !== undefined ? propExpandedId : localExpandedId;
-  const toggleExpand = (id: string) => {
-    const nextId = activeExpandedId === id ? null : id;
+  const toggleExpand = (item: HistoryItem, displayCode: string) => {
+    const isCurrentlyExpanded = 
+      activeExpandedId === item.id || 
+      activeExpandedId === displayCode || 
+      (item.analysis_code && activeExpandedId === item.analysis_code) ||
+      (item.id && activeExpandedId === String(item.id));
+
+    const nextId = isCurrentlyExpanded ? null : (item.id || displayCode);
     if (propSetExpandedId) {
       propSetExpandedId(nextId);
     } else {
@@ -204,79 +345,102 @@ export default function HistoryTab({
         : '/api/log-analysis';
       const endpoint = `${base}?p_analysis_code=${encodeURIComponent(analysisCode)}`;
 
-      let response: Response;
+      let response: Response | null = null;
       try {
         response = await fetch(endpoint, {
           method: 'GET',
           headers: { 'Accept': 'application/json' }
         });
       } catch (directErr) {
-        if (preferredBackendUrl) {
-          console.warn('[HistoryTab] Direct fetch to preferredBackendUrl failed, falling back to /api/log-analysis:', directErr);
-          response = await fetch(`/api/log-analysis?p_analysis_code=${encodeURIComponent(analysisCode)}`, {
+        console.warn('[HistoryTab] Direct fetch failed, trying proxy endpoint:', directErr);
+      }
+
+      if (!response || !response.ok) {
+        try {
+          const proxyUrl = `/api/log-analysis?p_analysis_code=${encodeURIComponent(analysisCode)}${preferredBackendUrl ? `&backend_url=${encodeURIComponent(preferredBackendUrl)}` : ''}`;
+          response = await fetch(proxyUrl, {
             method: 'GET',
-            headers: { 'Accept': 'application/json' }
+            headers: { 
+              'Accept': 'application/json',
+              ...(preferredBackendUrl ? { 'x-backend-url': preferredBackendUrl } : {})
+            }
           });
-        } else {
-          throw directErr;
+        } catch (proxyErr) {
+          console.error('[HistoryTab] Proxy fetch failed:', proxyErr);
         }
       }
 
-      if (response.ok) {
+      if (response && response.ok) {
         const data = await response.json();
         console.log(`[HistoryTab] Received /api/log-analysis response for ${analysisCode}:`, data);
 
-        const recordData = data.data || data.record || data.analysis || data.result || data;
-        if (recordData) {
-          setHistoryList(prevList => prevList.map(h => {
-            const isMatch = (h.analysis_code === analysisCode) || 
-                            (h.id === item.id) ||
-                            (h.analysis_code === item.analysis_code) ||
-                            (h.id === analysisCode);
-            if (isMatch) {
-              const candidateStatus = (data.record?.status) || (data.data?.status) || recordData.status;
-              const finalStatus = resolveValidStatus(candidateStatus, h.status);
+        const extracted = extractAnalysisResponse(data);
+        const resolvedCode = extracted.analysisCode || analysisCode;
 
+        // Populate detailsMap with extracted data immediately
+        setDetailsMap(prev => ({
+          ...prev,
+          [analysisCode]: extracted,
+          [resolvedCode]: extracted,
+          ...(item.id ? { [String(item.id)]: extracted } : {}),
+          ...(item.analysis_code ? { [String(item.analysis_code)]: extracted } : {})
+        }));
+
+        // Update local historyList state so list view and badges reflect returned data
+        setHistoryList(prevList => prevList.map(h => {
+          const cleanParam = analysisCode.replace(/^ANL-/, '');
+          const isMatch = 
+            (h === item) ||
+            (h.id && item.id && String(h.id) === String(item.id)) ||
+            (h.analysis_code && item.analysis_code && String(h.analysis_code) === String(item.analysis_code)) ||
+            (h.analysis_code && String(h.analysis_code) === String(analysisCode)) ||
+            (h.analysis_code && String(h.analysis_code) === String(resolvedCode)) ||
+            (h.id && String(h.id) === String(analysisCode)) ||
+            (h.id && String(h.id) === String(resolvedCode)) ||
+            (cleanParam && h.analysis_code && String(h.analysis_code).replace(/^ANL-/, '') === cleanParam);
+
+          if (isMatch) {
+            const finalStatus = resolveValidStatus(extracted.status, h.status);
+            return {
+              ...h,
+              analysis_code: resolvedCode || h.analysis_code || analysisCode,
+              status: finalStatus,
+              engine_llm_model: extracted.model || h.engine_llm_model,
+              input: extracted.input || h.input,
+              output: extracted.output || h.output,
+              input_char_count: extracted.inputCharCount || (extracted.input ? extracted.input.length : h.input_char_count),
+              completed_at: extracted.completedAt || h.completed_at
+            };
+          }
+          return h;
+        }));
+
+        // Sync with parent state if provided
+        if (setAnalysisHistory && analysisHistory) {
+          const updated = analysisHistory.map(h => {
+            const isMatch = 
+              (h.id && item.id && String(h.id) === String(item.id)) ||
+              (h.analysis_code && item.analysis_code && String(h.analysis_code) === String(item.analysis_code)) ||
+              (h.analysis_code && String(h.analysis_code) === String(analysisCode)) ||
+              (h.analysis_code && String(h.analysis_code) === String(resolvedCode)) ||
+              (h.id && String(h.id) === String(analysisCode));
+            if (isMatch) {
+              const finalStatus = resolveValidStatus(extracted.status, h.status);
               return {
                 ...h,
-                analysis_code: recordData.analysis_code || h.analysis_code || analysisCode,
+                analysis_code: resolvedCode || h.analysis_code || analysisCode,
                 status: finalStatus,
-                engine_llm_model: recordData.engine_llm_model || recordData.model || h.engine_llm_model,
-                input: recordData.input !== undefined ? recordData.input : h.input,
-                output: recordData.output !== undefined ? recordData.output : (recordData.report !== undefined ? recordData.report : h.output),
-                input_char_count: recordData.input_char_count !== undefined ? recordData.input_char_count : h.input_char_count,
-                completed_at: recordData.completed_at || h.completed_at
+                engine_llm_model: extracted.model || h.engine_llm_model,
+                input: extracted.input || h.input,
+                output: extracted.output || h.output
               };
             }
             return h;
-          }));
-
-          if (setAnalysisHistory && analysisHistory) {
-            const updated = analysisHistory.map(h => {
-              const isMatch = (h.analysis_code === analysisCode) || 
-                              (h.id === item.id) ||
-                              (h.analysis_code === item.analysis_code) ||
-                              (h.id === analysisCode);
-              if (isMatch) {
-                const candidateStatus = (data.record?.status) || (data.data?.status) || recordData.status;
-                const finalStatus = resolveValidStatus(candidateStatus, h.status);
-
-                return {
-                  ...h,
-                  analysis_code: recordData.analysis_code || h.analysis_code || analysisCode,
-                  status: finalStatus,
-                  engine_llm_model: recordData.engine_llm_model || recordData.model || h.engine_llm_model,
-                  input: recordData.input !== undefined ? recordData.input : h.input,
-                  output: recordData.output !== undefined ? recordData.output : (recordData.report !== undefined ? recordData.report : h.output)
-                };
-              }
-              return h;
-            });
-            setAnalysisHistory(updated);
-          }
+          });
+          setAnalysisHistory(updated);
         }
       } else {
-        console.warn(`[HistoryTab] /api/log-analysis returned HTTP ${response.status}`);
+        console.warn(`[HistoryTab] /api/log-analysis returned HTTP ${response?.status}`);
       }
     } catch (err) {
       console.error(`[HistoryTab] Error calling /api/log-analysis for ${analysisCode}:`, err);
@@ -299,7 +463,7 @@ export default function HistoryTab({
     }
 
     // Toggle item expansion
-    toggleExpand(item.id || displayCode);
+    toggleExpand(item, displayCode);
 
     // Call /api/log-analysis passing analysis_code starting with ANL- as a parameter
     fetchLogAnalysis(analysisCode, item);
@@ -1008,13 +1172,44 @@ export default function HistoryTab({
         <div className="space-y-3">
           {currentPaginatedItems.map((item, idx) => {
             const displayCode = item.analysis_code || item.id || `ANL-${idx + 1}`;
-            const displayStatus = resolveValidStatus(item.status, 'COMPLETED');
-            const displayModel = item.engine_llm_model || 'openai/gpt-4o';
-            const displayCharCount = item.input_char_count !== undefined 
-              ? item.input_char_count 
-              : (item.input?.length || 0);
-            const displayTimestamp = item.created_at || item.completed_at || item.timestamp || '';
-            const isExpanded = activeExpandedId === item.id || activeExpandedId === displayCode;
+            const itemKey = item.id || displayCode || `item-${idx}`;
+
+            // Check expansion against all identifiers
+            const isExpanded = 
+              activeExpandedId === item.id || 
+              activeExpandedId === displayCode || 
+              (item.analysis_code && activeExpandedId === item.analysis_code) ||
+              (item.id && activeExpandedId === String(item.id));
+
+            // Lookup extracted detail from /api/log-analysis response
+            const itemDetail = 
+              (item.id && detailsMap[String(item.id)]) ||
+              (item.analysis_code && detailsMap[String(item.analysis_code)]) ||
+              (displayCode && detailsMap[displayCode]);
+
+            const displayInput = (itemDetail?.input !== undefined && itemDetail.input !== '') 
+              ? itemDetail.input 
+              : (item.input || '');
+            const displayOutput = (itemDetail?.output !== undefined && itemDetail.output !== '') 
+              ? itemDetail.output 
+              : (item.output || '');
+
+            const displayStatus = resolveValidStatus(itemDetail?.status || item.status, 'COMPLETED');
+            const displayModel = itemDetail?.model || item.engine_llm_model || 'openai/gpt-4o';
+            const displayCharCount = itemDetail?.inputCharCount !== undefined 
+              ? itemDetail.inputCharCount 
+              : (item.input_char_count !== undefined 
+                  ? item.input_char_count 
+                  : (displayInput ? displayInput.length : 0));
+            const displayTimestamp = itemDetail?.completedAt || item.created_at || item.completed_at || item.timestamp || '';
+
+            const isItemFetching = 
+              fetchingAnalysisCode === (item.analysis_code || displayCode) ||
+              fetchingAnalysisCode === item.analysis_code ||
+              fetchingAnalysisCode === displayCode ||
+              fetchingAnalysisCode === item.id;
+
+            const isRawView = !!rawViewMap[itemKey];
 
             return (
               <div 
@@ -1025,7 +1220,7 @@ export default function HistoryTab({
               >
                 <button 
                   onClick={() => handleResultClick(item, displayCode)}
-                  className="w-full px-6 py-5 flex items-center justify-between text-left group"
+                  className="w-full px-6 py-5 flex items-center justify-between text-left group cursor-pointer"
                 >
                   <div className="flex items-center gap-5">
                     <div className="w-11 h-11 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-400 group-hover:text-blue-600 group-hover:bg-blue-50/50 transition-colors shrink-0">
@@ -1048,10 +1243,10 @@ export default function HistoryTab({
                           {displayModel}
                         </span>
 
-                        {fetchingAnalysisCode === (item.analysis_code || displayCode) && (
+                        {isItemFetching && (
                           <span className="px-2 py-0.5 bg-blue-50 text-blue-600 rounded text-[9px] font-bold border border-blue-200 flex items-center gap-1 animate-pulse">
                             <Loader2 size={10} className="animate-spin text-blue-600" />
-                            Loading API...
+                            Fetching /api/log-analysis...
                           </span>
                         )}
                       </div>
@@ -1064,7 +1259,7 @@ export default function HistoryTab({
                           </span>
                         )}
                         <span className="text-slate-200">|</span>
-                        <span className="font-sans">{displayCharCount} characters analyzed</span>
+                        <span className="font-sans">{displayCharCount.toLocaleString()} characters analyzed</span>
                       </div>
                     </div>
                   </div>
@@ -1084,43 +1279,121 @@ export default function HistoryTab({
                       exit={{ height: 0, opacity: 0 }}
                       className="overflow-hidden"
                     >
-                      <div className="px-6 pb-6 pt-2 grid grid-cols-1 md:grid-cols-2 gap-6 border-t border-slate-100">
+                      <div className="px-6 pb-6 pt-2 grid grid-cols-1 lg:grid-cols-2 gap-6 border-t border-slate-100">
+                        {/* Input Raw Logs Text Box */}
                         <div className="space-y-3">
                           <div className="flex items-center justify-between">
-                            <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Input Raw Logs</h4>
-                            {item.input && (
-                              <button 
-                                onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(item.input || ''); }}
-                                className="text-[9px] font-bold text-blue-600 uppercase hover:underline"
-                              >
-                                Copy Raw
-                              </button>
-                            )}
+                            <div className="flex items-center gap-2">
+                              <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Input Raw Logs</h4>
+                              {displayInput ? (
+                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-mono font-medium">
+                                  {displayInput.length.toLocaleString()} chars
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {displayInput && (
+                                <button 
+                                  type="button"
+                                  onClick={(e) => { 
+                                    e.stopPropagation(); 
+                                    navigator.clipboard.writeText(displayInput); 
+                                  }}
+                                  className="text-[9px] font-bold text-blue-600 uppercase hover:underline flex items-center gap-1 cursor-pointer"
+                                  title="Copy raw logs to clipboard"
+                                >
+                                  <Copy size={11} />
+                                  Copy Raw
+                                </button>
+                              )}
+                            </div>
                           </div>
-                          <div className="bg-slate-50 border border-slate-100 rounded-xl p-4 font-mono text-[11px] text-slate-600 max-h-[350px] overflow-y-auto whitespace-pre custom-scrollbar">
-                            {item.input || 'No raw log input content recorded for this entry.'}
-                          </div>
+
+                          {isItemFetching && !displayInput ? (
+                            <div className="w-full h-80 bg-slate-50 border border-slate-200 rounded-xl p-6 flex flex-col items-center justify-center gap-2 text-slate-400">
+                              <Loader2 size={20} className="animate-spin text-blue-500" />
+                              <span className="text-xs font-mono text-slate-600">Retrieving raw input from /api/log-analysis...</span>
+                            </div>
+                          ) : (
+                            <textarea
+                              id={`input-textbox-${itemKey}`}
+                              readOnly
+                              value={displayInput || 'No raw log input content recorded for this entry.'}
+                              placeholder="No raw log input content recorded for this entry."
+                              className="w-full h-80 bg-slate-50 border border-slate-200 rounded-xl p-4 font-mono text-[11px] text-slate-700 leading-relaxed resize-none focus:outline-none focus:ring-1 focus:ring-blue-400 custom-scrollbar select-text"
+                            />
+                          )}
                         </div>
 
+                        {/* Intelligence Report Text Box */}
                         <div className="space-y-3">
                           <div className="flex items-center justify-between">
-                            <h4 className="text-[10px] font-bold text-blue-600 uppercase tracking-widest">Intelligence Report</h4>
-                            {item.output && (
-                              <button 
-                                onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(item.output || ''); }}
-                                className="text-[9px] font-bold text-blue-600 uppercase hover:underline"
-                              >
-                                Copy Report
-                              </button>
-                            )}
+                            <div className="flex items-center gap-2">
+                              <h4 className="text-[10px] font-bold text-blue-600 uppercase tracking-widest">Intelligence Report</h4>
+                              {displayOutput ? (
+                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-mono font-bold">
+                                  API Returned
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {displayOutput && (
+                                <button 
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setRawViewMap(prev => ({
+                                      ...prev,
+                                      [itemKey]: !prev[itemKey]
+                                    }));
+                                  }}
+                                  className="text-[9px] font-bold text-slate-600 hover:text-slate-900 uppercase px-2 py-0.5 rounded border border-slate-200 bg-white shadow-2xs hover:bg-slate-50 cursor-pointer"
+                                >
+                                  {isRawView ? 'Markdown View' : 'Raw Textbox'}
+                                </button>
+                              )}
+                              {displayOutput && (
+                                <button 
+                                  type="button"
+                                  onClick={(e) => { 
+                                    e.stopPropagation(); 
+                                    navigator.clipboard.writeText(displayOutput); 
+                                  }}
+                                  className="text-[9px] font-bold text-blue-600 uppercase hover:underline flex items-center gap-1 cursor-pointer"
+                                  title="Copy report to clipboard"
+                                >
+                                  <Copy size={11} />
+                                  Copy Report
+                                </button>
+                              )}
+                            </div>
                           </div>
-                          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-[11px] text-blue-100/90 max-h-[350px] overflow-y-auto custom-scrollbar leading-relaxed markdown-container">
-                            {item.output ? (
-                              <ReactMarkdown>{item.output}</ReactMarkdown>
-                            ) : (
-                              <span className="text-slate-500 italic">No output report recorded for this entry.</span>
-                            )}
-                          </div>
+
+                          {isItemFetching && !displayOutput ? (
+                            <div className="w-full h-80 bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-col items-center justify-center gap-2 text-slate-400">
+                              <Loader2 size={20} className="animate-spin text-blue-400" />
+                              <span className="text-xs font-mono text-blue-200">Retrieving intelligence analysis from /api/log-analysis...</span>
+                            </div>
+                          ) : isRawView ? (
+                            <textarea
+                              id={`output-textbox-${itemKey}`}
+                              readOnly
+                              value={displayOutput || 'No output report recorded for this entry.'}
+                              placeholder="No output report recorded for this entry."
+                              className="w-full h-80 bg-slate-900 border border-slate-800 text-blue-100 rounded-xl p-4 font-mono text-[11px] leading-relaxed resize-none focus:outline-none focus:ring-1 focus:ring-blue-500 custom-scrollbar select-text"
+                            />
+                          ) : (
+                            <div 
+                              id={`output-container-${itemKey}`}
+                              className="w-full h-80 bg-slate-900 border border-slate-800 rounded-xl p-4 text-[11px] text-blue-100/90 overflow-y-auto custom-scrollbar leading-relaxed markdown-container select-text"
+                            >
+                              {displayOutput ? (
+                                <ReactMarkdown>{displayOutput}</ReactMarkdown>
+                              ) : (
+                                <span className="text-slate-500 italic">No output report recorded for this entry.</span>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </motion.div>
