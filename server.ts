@@ -512,18 +512,55 @@ async function startServer() {
         console.log(`Fetching agents from configured backend: ${backendUrl}/api/listagents`);
         try {
           const response = await fetchWithTimeout(`${backendUrl}/api/listagents`, {
-            headers: { 'Accept': 'application/json' },
+            headers: { 'Accept': 'application/json, text/plain, */*' },
             timeout: 15000
           });
           
           if (response.ok) {
-            const data = await response.json();
-            
+            const rawText = await response.text();
+            let data: any;
+            try {
+              data = JSON.parse(rawText);
+            } catch {
+              data = rawText;
+            }
+
+            const cleanQuote = (val: any): string => {
+              if (val === undefined || val === null) return '';
+              let s = String(val).trim();
+              if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+                s = s.slice(1, -1).trim();
+              }
+              return s;
+            };
+
+            const splitCsvRow = (row: string): string[] => {
+              const result: string[] = [];
+              let current = '';
+              let inQuotes = false;
+              let quoteChar = '';
+              for (let i = 0; i < row.length; i++) {
+                const char = row[i];
+                if ((char === '"' || char === "'") && (i === 0 || row[i - 1] !== '\\')) {
+                  if (!inQuotes) { inQuotes = true; quoteChar = char; }
+                  else if (quoteChar === char) { inQuotes = false; }
+                  else { current += char; }
+                } else if (char === ',' && !inQuotes) {
+                  result.push(current.trim());
+                  current = '';
+                } else {
+                  current += char;
+                }
+              }
+              result.push(current.trim());
+              return result;
+            };
+
             const isTruthy = (val: any): boolean => {
               if (val === true || val === 1) return true;
               if (typeof val === 'string') {
                 const s = val.trim().toLowerCase();
-                return s === 'true' || s === '1' || s === 'yes';
+                return s === 'true' || s === '1' || s === 'yes' || s === 'y' || s === 'primary' || s === 'default';
               }
               return false;
             };
@@ -533,7 +570,7 @@ async function startServer() {
               if (val === false || val === 0) return false;
               if (typeof val === 'string') {
                 const s = val.trim().toLowerCase();
-                return s !== 'false' && s !== '0' && s !== 'no';
+                return s !== 'false' && s !== '0' && s !== 'no' && s !== 'inactive';
               }
               return Boolean(val);
             };
@@ -544,41 +581,109 @@ async function startServer() {
               if (str.includes('=')) {
                 const parts = str.split('=');
                 parts.shift();
-                let value = parts.join('=').trim();
-                if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-                  value = value.substring(1, value.length - 1);
-                }
-                return value;
+                return cleanQuote(parts.join('=').trim());
               }
-              return str;
+              return cleanQuote(str);
             };
 
-            // Robust extraction function to handle various response structures
+            const parseStringPayload = (str: string): any[] => {
+              if (!str || typeof str !== 'string') return [];
+              const trimmed = str.trim();
+              if (!trimmed) return [];
+
+              try {
+                const parsed = JSON.parse(trimmed);
+                if (parsed && typeof parsed !== 'string') {
+                  return extractAgentItems(parsed);
+                }
+              } catch {}
+
+              const tupleMatches = trimmed.match(/(?:Agent)?\s*\(([^()]+)\)/g);
+              if (tupleMatches && tupleMatches.length > 0) {
+                const items: any[] = [];
+                for (const t of tupleMatches) {
+                  const inner = t.replace(/^(?:Agent)?\s*\(/, '').replace(/\)\s*$/, '').trim();
+                  if (!inner) continue;
+                  if (inner.includes('=')) {
+                    const obj: Record<string, any> = {};
+                    const kvRegex = /([a-zA-Z0-9_]+)\s*=\s*(?:(['"])(.*?)\2|([^,]+))/g;
+                    let kvMatch;
+                    while ((kvMatch = kvRegex.exec(inner)) !== null) {
+                      obj[kvMatch[1].trim()] = cleanQuote((kvMatch[3] !== undefined ? kvMatch[3] : (kvMatch[4] || '')).trim());
+                    }
+                    if (Object.keys(obj).length > 0) { items.push(obj); continue; }
+                  }
+                  items.push(splitCsvRow(inner).map(cleanQuote));
+                }
+                if (items.length > 0) return items;
+              }
+
+              const lines = trimmed.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0 && !l.startsWith('#'));
+              if (lines.length > 1) {
+                return lines.map((line, idx) => {
+                  if (line.includes('=')) {
+                    const obj: Record<string, any> = {};
+                    const kvRegex = /([a-zA-Z0-9_]+)\s*=\s*(?:(['"])(.*?)\2|([^,\s;]+))/g;
+                    let m;
+                    while ((m = kvRegex.exec(line)) !== null) {
+                      obj[m[1].trim()] = cleanQuote((m[3] !== undefined ? m[3] : (m[4] || '')).trim());
+                    }
+                    if (Object.keys(obj).length > 0) return obj;
+                  }
+                  if (line.includes(',')) return splitCsvRow(line).map(cleanQuote);
+                  return { id: String(idx + 1), name: line };
+                });
+              }
+
+              return [{ name: trimmed }];
+            };
+
             const extractAgentItems = (input: any): any[] => {
               if (!input) return [];
+              if (typeof input === 'string') return parseStringPayload(input);
 
               if (Array.isArray(input)) {
-                // If single nested array: e.g. [[agent1, agent2]] or [[[agent1, agent2]]]
-                if (input.length === 1 && Array.isArray(input[0])) {
-                  return extractAgentItems(input[0]);
-                }
-                // If array of tuples: [ [id, name, ...], [id, name, ...] ]
-                if (input.length > 0 && Array.isArray(input[0])) {
-                  return input;
-                }
-                // If array of objects: [ { id: 1, ... }, { id: 2, ... } ]
-                if (input.length > 0 && typeof input[0] === 'object' && input[0] !== null) {
-                  return input;
-                }
-                // If input is a single tuple array: ["1", "Agent Name", "gpt-4o", ...]
-                if (input.length >= 2 && !Array.isArray(input[0]) && typeof input[0] !== 'object') {
+                if (input.length === 0) return [];
+                if (input.length === 1 && typeof input[0] === 'string') return parseStringPayload(input[0]);
+                if (input.length === 1 && Array.isArray(input[0])) return extractAgentItems(input[0]);
+
+                if (input.every(item => item && typeof item === 'object' && !Array.isArray(item))) return input;
+                if (input.every(item => Array.isArray(item))) return input;
+
+                if (input.every(item => typeof item === 'string')) {
+                  const hasDelimiters = input.some(str => str.includes(',') || str.includes('=') || str.includes('('));
+                  if (hasDelimiters) {
+                    const expanded = input.flatMap(str => parseStringPayload(str));
+                    if (expanded.length > 0) return expanded;
+                  }
+                  const looksLikeAgentNames = input.every(str => !str.includes('http') && !str.includes('@') && isNaN(Number(str)));
+                  if (looksLikeAgentNames && input.length >= 2) {
+                    return input.map((name, idx) => ({ id: String(idx + 1), name: cleanQuote(name) }));
+                  }
+                  if (input.length >= 8) {
+                    const chunkSize = input.length % 7 === 0 ? 7 : (input.length % 6 === 0 ? 6 : 7);
+                    const chunks: any[] = [];
+                    for (let i = 0; i < input.length; i += chunkSize) {
+                      chunks.push(input.slice(i, i + chunkSize));
+                    }
+                    return chunks;
+                  }
                   return [input];
                 }
-                return input;
+
+                if (input.length >= 8) {
+                  const chunkSize = input.length % 7 === 0 ? 7 : (input.length % 6 === 0 ? 6 : 7);
+                  const chunks: any[] = [];
+                  for (let i = 0; i < input.length; i += chunkSize) {
+                    chunks.push(input.slice(i, i + chunkSize));
+                  }
+                  return chunks;
+                }
+
+                return [input];
               }
 
               if (typeof input === 'object' && input !== null) {
-                // Check common wrapper fields
                 const candidateKeys = ['agents', 'data', 'result', 'records', 'items', 'agent', 'response', 'payload'];
                 for (const key of candidateKeys) {
                   if (input[key] !== undefined && input[key] !== null) {
@@ -586,28 +691,61 @@ async function startServer() {
                     if (res && res.length > 0) return res;
                   }
                 }
-                // Check configuration.agents.agent (XML / config wrapper)
                 if (input.configuration?.agents?.agent) {
                   return extractAgentItems(input.configuration.agents.agent);
                 }
-                // Check numeric/index keys: e.g. { "0": agent1, "1": agent2 }
+                if (Array.isArray(input.rows)) {
+                  const cols: string[] = Array.isArray(input.columns) ? input.columns.map((c: any) => String(c).toLowerCase()) : [];
+                  return input.rows.map((row: any[]) => {
+                    if (!Array.isArray(row) || cols.length === 0) return row;
+                    const obj: Record<string, any> = {};
+                    cols.forEach((col, idx) => { obj[col] = row[idx]; });
+                    return obj;
+                  });
+                }
                 const keys = Object.keys(input);
                 const isNumeric = keys.length > 0 && keys.every(k => !isNaN(Number(k)));
-                if (isNumeric) {
-                  return keys.map(k => input[k]);
-                }
-                // Single agent object
+                if (isNumeric) return keys.map(k => input[k]);
                 if (input.name || input.agent_name || input.id || input.agent_id || input.llm_model || input.model) {
                   return [input];
                 }
-                // Check dictionary of agent objects: e.g. { "agent_1": {...}, "agent_2": {...} }
                 const vals = Object.values(input);
-                if (vals.length > 0 && vals.every(v => v && typeof v === 'object')) {
-                  return vals;
+                if (vals.length > 0) {
+                  return vals.flatMap(v => typeof v === 'string' ? parseStringPayload(v) : [v]);
                 }
               }
 
               return [];
+            };
+
+            const sanitizeAgentName = (rawName: any, fallbackId: string): string => {
+              let name = String(rawName !== undefined && rawName !== null ? rawName : '').trim();
+              if (name.includes('Agent(') || name.includes('agent_name=') || name.includes('name=')) {
+                const m = name.match(/(?:agent_)?name\s*=\s*(?:['"]([^'"]+)['"]|([^,)]+))/i);
+                if (m) name = (m[1] || m[2]).trim();
+              }
+              if (name.startsWith('(') && name.endsWith(')')) name = name.slice(1, -1).trim();
+              if (name.includes(',')) {
+                const parts = splitCsvRow(name).map(cleanQuote);
+                name = parts.length >= 2 ? (parts[1] || parts[0]) : parts[0];
+              }
+              name = cleanQuote(name);
+              return name || `Agent ${fallbackId}`;
+            };
+
+            const sanitizeAgentId = (rawId: any, fallbackIdx: number): string => {
+              let idStr = String(rawId !== undefined && rawId !== null ? rawId : '').trim();
+              if (idStr.includes('Agent(') || idStr.includes('agent_id=') || idStr.includes('id=')) {
+                const m = idStr.match(/(?:agent_)?id\s*=\s*(?:['"]([^'"]+)['"]|([^,)]+))/i);
+                if (m) idStr = (m[1] || m[2]).trim();
+              }
+              if (idStr.startsWith('(') && idStr.endsWith(')')) idStr = idStr.slice(1, -1).trim();
+              if (idStr.includes(',')) {
+                const parts = splitCsvRow(idStr).map(cleanQuote);
+                idStr = parts[0] || String(fallbackIdx);
+              }
+              idStr = cleanQuote(idStr).replace(/^agent-/, '').trim();
+              return idStr || String(fallbackIdx);
             };
 
             const extractedItems = extractAgentItems(data);
@@ -615,8 +753,15 @@ async function startServer() {
 
             const mappedAgents = extractedItems.map((a: any, idx: number) => {
               if (Array.isArray(a)) {
-                const idVal = parseAgentField(a[0]);
-                const nameVal = parseAgentField(a[1]);
+                const rawIdVal = parseAgentField(a[0]);
+                let id = sanitizeAgentId(rawIdVal, idx + 1);
+                if (seenIds.has(id)) {
+                  id = `${id}-${idx + 1}`;
+                }
+                seenIds.add(id);
+
+                const rawNameVal = parseAgentField(a[1]);
+                const nameVal = sanitizeAgentName(rawNameVal, id);
                 const modelVal = parseAgentField(a[2]);
                 const rawAgentBackendUrl = parseAgentField(a[3]);
                 const apiKeyVal = parseAgentField(a[4]);
@@ -626,12 +771,6 @@ async function startServer() {
                 const isPrimary = isTruthy(isPrimaryVal) || isTruthy(a[5]);
                 const isActive = isNotFalse(isActiveVal) && isNotFalse(a[6]);
                 const agentBackendUrl = (rawAgentBackendUrl && rawAgentBackendUrl !== '0.2' && isNaN(Number(rawAgentBackendUrl))) ? rawAgentBackendUrl : '';
-
-                let id = idVal ? idVal.replace(/^agent-/, '').trim() : String(idx + 1);
-                if (seenIds.has(id)) {
-                  id = `${id}-${idx + 1}`;
-                }
-                seenIds.add(id);
 
                 return {
                   id,
@@ -652,17 +791,18 @@ async function startServer() {
                               (a.agent_id !== undefined && a.agent_id !== null ? a.agent_id :
                               (a.agentId !== undefined && a.agentId !== null ? a.agentId :
                               (a._id !== undefined && a._id !== null ? a._id : '')));
-                let strId = String(rawId).replace(/^agent-/, '').trim();
+                let strId = sanitizeAgentId(rawId, idx + 1);
                 if (!strId || seenIds.has(strId)) {
                   strId = strId ? `${strId}-${idx + 1}` : String(idx + 1);
                 }
                 seenIds.add(strId);
 
-                const name = String(a.name || a.agent_name || a.agentName || a.title || `Agent ${strId}`).trim();
-                const model = String(a.llm_model || a.model || a.llmModel || a.engine_llm_model || '').trim();
-                const rawBackendUrl = String(a.conn_url || a.backendUrl || a.backend_url || a.connUrl || a.url || '').trim();
+                const rawName = a.name || a.agent_name || a.agentName || a.title;
+                const name = sanitizeAgentName(rawName, strId);
+                const model = cleanQuote(String(a.llm_model || a.model || a.llmModel || a.engine_llm_model || '').trim());
+                const rawBackendUrl = cleanQuote(String(a.conn_url || a.backendUrl || a.backend_url || a.connUrl || a.url || '').trim());
                 const backendUrl = (rawBackendUrl && rawBackendUrl !== '0.2' && isNaN(Number(rawBackendUrl))) ? rawBackendUrl : '';
-                const apiKey = String(a.api_key || a.apiKey || a.key || '').trim();
+                const apiKey = cleanQuote(String(a.api_key || a.apiKey || a.key || '').trim());
                 
                 const isPrimary = isTruthy(a.is_primary) || isTruthy(a.isPrimary) || isTruthy(a.is_default) || isTruthy(a.isDefault) || isTruthy(a.primary) || isTruthy(a.default);
                 const isActive = isNotFalse(a.is_active) && isNotFalse(a.isActive) && isNotFalse(a.active);
