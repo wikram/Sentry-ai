@@ -89,56 +89,6 @@ export default function AgentsTab({
         </div>
       </div>
 
-      {/* Agent Selector / Navigation Tabs */}
-      {agents.length > 0 && (
-        <div className="flex items-center gap-1.5 p-1.5 bg-white border border-slate-200 rounded-2xl shadow-sm overflow-x-auto custom-scrollbar">
-          <button
-            onClick={() => setSelectedAgentTab('all')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold tracking-wide transition-all flex items-center gap-2 shrink-0 ${
-              currentTab === 'all'
-                ? 'bg-slate-900 text-white shadow-md'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-            id="tab-all-agents"
-          >
-            <Layers size={14} />
-            <span>All Agents</span>
-            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
-              currentTab === 'all' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
-            }`}>
-              {agents.length}
-            </span>
-          </button>
-
-          {agents.map((agent, idx) => {
-            const isSelected = currentTab === agent.id;
-            const isPrimary = agent.isDefault === true || agent.is_primary === true;
-            const isActive = agent.isActive === true;
-            return (
-              <button
-                key={agent.id ? `nav-agent-${agent.id}` : `nav-agent-idx-${idx}`}
-                onClick={() => setSelectedAgentTab(agent.id)}
-                className={`px-4 py-2 rounded-xl text-xs font-bold tracking-wide transition-all flex items-center gap-2.5 shrink-0 ${
-                  isSelected
-                    ? 'bg-blue-600 text-white shadow-md'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                }`}
-                id={`tab-agent-${agent.id || idx}`}
-              >
-                <div className={`w-2 h-2 rounded-full ${isActive ? 'bg-emerald-400' : 'bg-slate-300'}`} />
-                <span className="truncate max-w-[140px]">{agent.name || `Agent ${agent.id || idx + 1}`}</span>
-                {isPrimary && (
-                  <span className={`text-[9px] px-1.5 py-0.2 font-black uppercase tracking-wider rounded ${
-                    isSelected ? 'bg-white/20 text-white' : 'bg-blue-50 text-blue-600'
-                  }`}>
-                    Primary
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      )}
 
       {/* Main Content Area */}
       <AnimatePresence mode="wait">
