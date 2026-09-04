@@ -451,6 +451,182 @@ export default function App() {
     }
   };
 
+  const normalizeAgentList = (rawData: any): RCAAgent[] => {
+    if (!rawData) return [];
+
+    const isTruthy = (val: any): boolean => {
+      if (val === true || val === 1) return true;
+      if (typeof val === 'string') {
+        const s = val.trim().toLowerCase();
+        return s === 'true' || s === '1' || s === 'yes';
+      }
+      return false;
+    };
+
+    const isNotFalse = (val: any): boolean => {
+      if (val === undefined || val === null) return true;
+      if (val === false || val === 0) return false;
+      if (typeof val === 'string') {
+        const s = val.trim().toLowerCase();
+        return s !== 'false' && s !== '0' && s !== 'no';
+      }
+      return Boolean(val);
+    };
+
+    const parseField = (val: any): string => {
+      if (val === undefined || val === null) return '';
+      const str = String(val).trim();
+      if (str.includes('=')) {
+        const parts = str.split('=');
+        parts.shift();
+        let value = parts.join('=').trim();
+        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+          value = value.substring(1, value.length - 1);
+        }
+        return value;
+      }
+      return str;
+    };
+
+    // Flatten/unwrap various response formats
+    const extractItems = (input: any): any[] => {
+      if (!input) return [];
+
+      if (Array.isArray(input)) {
+        // If single nested array: e.g. [[agent1, agent2]] or [[[agent1, agent2]]]
+        if (input.length === 1 && Array.isArray(input[0])) {
+          return extractItems(input[0]);
+        }
+        // If array of tuples: [ [id, name, ...], [id, name, ...] ]
+        if (input.length > 0 && Array.isArray(input[0])) {
+          return input;
+        }
+        // If array of objects: [ { id: 1, ... }, { id: 2, ... } ]
+        if (input.length > 0 && typeof input[0] === 'object' && input[0] !== null) {
+          return input;
+        }
+        // If input is a single tuple array: ["1", "Agent Name", "gpt-4o", ...]
+        if (input.length >= 2 && !Array.isArray(input[0]) && typeof input[0] !== 'object') {
+          return [input];
+        }
+        return input;
+      }
+
+      if (typeof input === 'object' && input !== null) {
+        // Check common wrapper fields
+        const candidateKeys = ['agents', 'data', 'result', 'records', 'items', 'agent', 'response', 'payload'];
+        for (const key of candidateKeys) {
+          if (input[key] !== undefined && input[key] !== null) {
+            const res = extractItems(input[key]);
+            if (res && res.length > 0) return res;
+          }
+        }
+        // Check configuration.agents.agent (XML / config wrapper)
+        if (input.configuration?.agents?.agent) {
+          return extractItems(input.configuration.agents.agent);
+        }
+        // Check numeric/index keys: e.g. { "0": agent1, "1": agent2 }
+        const keys = Object.keys(input);
+        const isNumeric = keys.length > 0 && keys.every(k => !isNaN(Number(k)));
+        if (isNumeric) {
+          return keys.map(k => input[k]);
+        }
+        // Single agent object
+        if (input.name || input.agent_name || input.id || input.agent_id || input.llm_model || input.model) {
+          return [input];
+        }
+        // Check dictionary of agent objects: e.g. { "agent_1": {...}, "agent_2": {...} }
+        const vals = Object.values(input);
+        if (vals.length > 0 && vals.every(v => v && typeof v === 'object')) {
+          return vals;
+        }
+      }
+
+      return [];
+    };
+
+    const rawList = extractItems(rawData);
+    if (!rawList || rawList.length === 0) return [];
+
+    const seenIds = new Set<string>();
+
+    const mapped: RCAAgent[] = rawList.map((a: any, idx: number): RCAAgent | null => {
+      if (Array.isArray(a)) {
+        const idVal = parseField(a[0]);
+        const nameVal = parseField(a[1]);
+        const modelVal = parseField(a[2]);
+        const rawUrl = parseField(a[3]);
+        const apiKeyVal = parseField(a[4]);
+        const isPrimaryVal = parseField(a[5]);
+        const isActiveVal = parseField(a[6]);
+
+        const isPrimary = isTruthy(isPrimaryVal) || isTruthy(a[5]);
+        const isActive = isNotFalse(isActiveVal) && isNotFalse(a[6]);
+        const backendUrl = (rawUrl && rawUrl !== '0.2' && isNaN(Number(rawUrl))) ? rawUrl : '';
+
+        let id = idVal ? idVal.replace(/^agent-/, '').trim() : String(idx + 1);
+        if (seenIds.has(id)) {
+          id = `${id}-${idx + 1}`;
+        }
+        seenIds.add(id);
+
+        return {
+          id,
+          name: nameVal || `Agent ${id}`,
+          status: isActive ? 'idle' : 'complete',
+          isActive,
+          backendUrl,
+          model: modelVal || '',
+          apiKey: apiKeyVal || '',
+          isDefault: isPrimary,
+          is_primary: isPrimary,
+          findings: []
+        };
+      } else if (a && typeof a === 'object') {
+        const rawId = a.id !== undefined && a.id !== null ? a.id :
+                      (a.agent_id !== undefined && a.agent_id !== null ? a.agent_id :
+                      (a.agentId !== undefined && a.agentId !== null ? a.agentId :
+                      (a._id !== undefined && a._id !== null ? a._id : '')));
+        let strId = String(rawId).replace(/^agent-/, '').trim();
+        if (!strId || seenIds.has(strId)) {
+          strId = strId ? `${strId}-${idx + 1}` : String(idx + 1);
+        }
+        seenIds.add(strId);
+
+        const name = String(a.name || a.agent_name || a.agentName || a.title || `Agent ${strId}`).trim();
+        const model = String(a.llm_model || a.model || a.llmModel || a.engine_llm_model || '').trim();
+        const rawBackendUrl = String(a.conn_url || a.backendUrl || a.backend_url || a.connUrl || a.url || '').trim();
+        const backendUrl = (rawBackendUrl && rawBackendUrl !== '0.2' && isNaN(Number(rawBackendUrl))) ? rawBackendUrl : '';
+        const apiKey = String(a.api_key || a.apiKey || a.key || '').trim();
+
+        const isPrimary = isTruthy(a.is_primary) || isTruthy(a.isPrimary) || isTruthy(a.is_default) || isTruthy(a.isDefault) || isTruthy(a.primary) || isTruthy(a.default);
+        const isActive = isNotFalse(a.is_active) && isNotFalse(a.isActive) && isNotFalse(a.active);
+        const findings = Array.isArray(a.findings) ? a.findings : (Array.isArray(a.findings?.finding) ? a.findings.finding : []);
+
+        return {
+          id: strId,
+          name: name || `Agent ${strId}`,
+          status: a.status || (isActive ? 'idle' : 'complete'),
+          isActive,
+          backendUrl,
+          model,
+          apiKey,
+          isDefault: isPrimary,
+          is_primary: isPrimary,
+          findings
+        };
+      }
+      return null;
+    }).filter((item): item is RCAAgent => item !== null);
+
+    if (mapped.length > 0 && !mapped.some(a => a.isDefault || a.is_primary)) {
+      mapped[0].isDefault = true;
+      mapped[0].is_primary = true;
+    }
+
+    return mapped;
+  };
+
   const fetchAndSetAgents = async () => {
     setIsFetchingAgents(true);
 
@@ -458,20 +634,10 @@ export default function App() {
       const listagentsRes = await fetch('/api/listagents');
       if (listagentsRes.ok) {
         const listagentsData = await listagentsRes.json();
-        const fetchedAgents = Array.isArray(listagentsData) ? listagentsData : (listagentsData?.agents || []);
-        if (fetchedAgents && fetchedAgents.length > 0) {
-          const normalized = fetchedAgents.map((a: any) => {
-            const isPrim = a.isDefault === true || a.is_primary === true || String(a.isDefault) === 'true' || String(a.is_primary) === 'true';
-            return {
-              ...a,
-              isDefault: isPrim,
-              is_primary: isPrim
-            };
-          });
-          if (!normalized.some((a: any) => a.isDefault)) {
-            normalized[0].isDefault = true;
-            normalized[0].is_primary = true;
-          }
+        console.log('[fetchAndSetAgents] Received listagents response:', listagentsData);
+        const normalized = normalizeAgentList(listagentsData);
+        console.log(`[fetchAndSetAgents] Extracted ${normalized.length} agents:`, normalized);
+        if (normalized.length > 0) {
           setAgents(normalized);
         }
       }
@@ -494,7 +660,12 @@ export default function App() {
         const configData = await configRes.json();
         
         setSources(configData.sources || []);
-        setAgents(configData.agents || []);
+        if (configData.agents) {
+          const initialAgents = normalizeAgentList(configData.agents);
+          if (initialAgents.length > 0) {
+            setAgents(initialAgents);
+          }
+        }
 
         // Load agents from listagents API and display them if any are returned
         try {

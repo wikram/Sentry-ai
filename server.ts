@@ -553,33 +553,73 @@ async function startServer() {
               return str;
             };
 
-            // Flatten nested array structures if backend returns e.g. [[{ id: 1, ... }]]
-            const flattenedAgents: any[] = [];
-            const processAgentItem = (item: any) => {
-              if (!item) return;
-              if (Array.isArray(item)) {
-                if (item.length > 0 && typeof item[0] === 'object' && item[0] !== null && !Array.isArray(item[0])) {
-                  for (const sub of item) {
-                    processAgentItem(sub);
-                  }
-                } else if (item.length === 1 && Array.isArray(item[0])) {
-                  processAgentItem(item[0]);
-                } else {
-                  flattenedAgents.push(item);
-                }
-              } else if (typeof item === 'object') {
-                flattenedAgents.push(item);
-              }
-            };
-            processAgentItem(data);
+            // Robust extraction function to handle various response structures
+            const extractAgentItems = (input: any): any[] => {
+              if (!input) return [];
 
-            const mappedAgents = flattenedAgents.map((a: any) => {
+              if (Array.isArray(input)) {
+                // If single nested array: e.g. [[agent1, agent2]] or [[[agent1, agent2]]]
+                if (input.length === 1 && Array.isArray(input[0])) {
+                  return extractAgentItems(input[0]);
+                }
+                // If array of tuples: [ [id, name, ...], [id, name, ...] ]
+                if (input.length > 0 && Array.isArray(input[0])) {
+                  return input;
+                }
+                // If array of objects: [ { id: 1, ... }, { id: 2, ... } ]
+                if (input.length > 0 && typeof input[0] === 'object' && input[0] !== null) {
+                  return input;
+                }
+                // If input is a single tuple array: ["1", "Agent Name", "gpt-4o", ...]
+                if (input.length >= 2 && !Array.isArray(input[0]) && typeof input[0] !== 'object') {
+                  return [input];
+                }
+                return input;
+              }
+
+              if (typeof input === 'object' && input !== null) {
+                // Check common wrapper fields
+                const candidateKeys = ['agents', 'data', 'result', 'records', 'items', 'agent', 'response', 'payload'];
+                for (const key of candidateKeys) {
+                  if (input[key] !== undefined && input[key] !== null) {
+                    const res = extractAgentItems(input[key]);
+                    if (res && res.length > 0) return res;
+                  }
+                }
+                // Check configuration.agents.agent (XML / config wrapper)
+                if (input.configuration?.agents?.agent) {
+                  return extractAgentItems(input.configuration.agents.agent);
+                }
+                // Check numeric/index keys: e.g. { "0": agent1, "1": agent2 }
+                const keys = Object.keys(input);
+                const isNumeric = keys.length > 0 && keys.every(k => !isNaN(Number(k)));
+                if (isNumeric) {
+                  return keys.map(k => input[k]);
+                }
+                // Single agent object
+                if (input.name || input.agent_name || input.id || input.agent_id || input.llm_model || input.model) {
+                  return [input];
+                }
+                // Check dictionary of agent objects: e.g. { "agent_1": {...}, "agent_2": {...} }
+                const vals = Object.values(input);
+                if (vals.length > 0 && vals.every(v => v && typeof v === 'object')) {
+                  return vals;
+                }
+              }
+
+              return [];
+            };
+
+            const extractedItems = extractAgentItems(data);
+            const seenIds = new Set<string>();
+
+            const mappedAgents = extractedItems.map((a: any, idx: number) => {
               if (Array.isArray(a)) {
-                const id = parseAgentField(a[0]);
-                const name = parseAgentField(a[1]);
-                const model = parseAgentField(a[2]);
+                const idVal = parseAgentField(a[0]);
+                const nameVal = parseAgentField(a[1]);
+                const modelVal = parseAgentField(a[2]);
                 const rawAgentBackendUrl = parseAgentField(a[3]);
-                const apiKey = parseAgentField(a[4]);
+                const apiKeyVal = parseAgentField(a[4]);
                 const isPrimaryVal = parseAgentField(a[5]);
                 const isActiveVal = parseAgentField(a[6]);
 
@@ -587,25 +627,40 @@ async function startServer() {
                 const isActive = isNotFalse(isActiveVal) && isNotFalse(a[6]);
                 const agentBackendUrl = (rawAgentBackendUrl && rawAgentBackendUrl !== '0.2' && isNaN(Number(rawAgentBackendUrl))) ? rawAgentBackendUrl : '';
 
+                let id = idVal ? idVal.replace(/^agent-/, '').trim() : String(idx + 1);
+                if (seenIds.has(id)) {
+                  id = `${id}-${idx + 1}`;
+                }
+                seenIds.add(id);
+
                 return {
-                  id: id ? id.replace(/^agent-/, '').trim() : String(Date.now()),
-                  name: name || 'Default OpenAI Engine',
+                  id,
+                  name: nameVal || `Agent ${id}`,
                   role: 'Specialized SRE Bot',
                   avatar: 'Cpu',
                   status: isActive ? 'idle' : 'Inactive',
                   isActive,
                   backendUrl: agentBackendUrl,
-                  model: model || '',
-                  apiKey: apiKey || '',
+                  model: modelVal || '',
+                  apiKey: apiKeyVal || '',
                   isDefault: isPrimary,
                   is_primary: isPrimary,
                   findings: []
                 };
               } else if (a && typeof a === 'object') {
-                const id = String(a.id !== undefined && a.id !== null ? a.id : (a.agent_id !== undefined ? a.agent_id : ''));
-                const name = String(a.name || a.agent_name || a.title || 'Default OpenAI Engine').trim();
-                const model = String(a.llm_model || a.model || a.llmModel || '').trim();
-                const rawBackendUrl = String(a.conn_url || a.backendUrl || a.backend_url || a.url || '').trim();
+                const rawId = a.id !== undefined && a.id !== null ? a.id :
+                              (a.agent_id !== undefined && a.agent_id !== null ? a.agent_id :
+                              (a.agentId !== undefined && a.agentId !== null ? a.agentId :
+                              (a._id !== undefined && a._id !== null ? a._id : '')));
+                let strId = String(rawId).replace(/^agent-/, '').trim();
+                if (!strId || seenIds.has(strId)) {
+                  strId = strId ? `${strId}-${idx + 1}` : String(idx + 1);
+                }
+                seenIds.add(strId);
+
+                const name = String(a.name || a.agent_name || a.agentName || a.title || `Agent ${strId}`).trim();
+                const model = String(a.llm_model || a.model || a.llmModel || a.engine_llm_model || '').trim();
+                const rawBackendUrl = String(a.conn_url || a.backendUrl || a.backend_url || a.connUrl || a.url || '').trim();
                 const backendUrl = (rawBackendUrl && rawBackendUrl !== '0.2' && isNaN(Number(rawBackendUrl))) ? rawBackendUrl : '';
                 const apiKey = String(a.api_key || a.apiKey || a.key || '').trim();
                 
@@ -614,8 +669,8 @@ async function startServer() {
                 const findings = Array.isArray(a.findings) ? a.findings : (Array.isArray(a.findings?.finding) ? a.findings.finding : []);
 
                 return {
-                  id: id ? id.replace(/^agent-/, '').trim() : String(Date.now()),
-                  name: name || 'Default OpenAI Engine',
+                  id: strId,
+                  name: name || `Agent ${strId}`,
                   role: a.role || 'Specialized SRE Bot',
                   avatar: a.avatar || 'Cpu',
                   status: a.status || (isActive ? 'idle' : 'Inactive'),

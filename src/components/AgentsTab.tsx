@@ -83,8 +83,11 @@ export default function AgentsTab({
                Configure First Agent
             </button>
           </div>
-        ) : agents.map(agent => (
-          <div key={agent.id} className={`bg-white border rounded-2xl p-8 transition-all group shadow-sm hover:shadow-md relative overflow-hidden ${agent.isActive ? 'border-slate-200 hover:border-blue-500/50' : 'border-slate-100 opacity-60'}`}>
+        ) : agents.map((agent, idx) => (
+          <div 
+            key={agent.id ? `agent-${agent.id}` : `agent-idx-${idx}`} 
+            className={`bg-white border rounded-2xl p-8 transition-all group shadow-sm hover:shadow-md relative overflow-hidden ${agent.isActive ? 'border-slate-200 hover:border-blue-500/50' : 'border-slate-100 opacity-60'}`}
+          >
             {!agent.isActive && (
               <div className="absolute top-0 right-0 p-2">
                  <span className="text-[8px] font-black uppercase tracking-tighter bg-slate-100 text-slate-400 px-1.5 py-0.5 rounded">DEACTIVATED</span>
@@ -122,15 +125,15 @@ export default function AgentsTab({
                 <input 
                   type="text" 
                   readOnly 
-                  value={`Agent id : ${agent.id}`} 
+                  value={`Agent id : ${agent.id || idx + 1}`} 
                   className="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-mono text-slate-500 max-w-[140px] text-right focus:outline-none"
-                  id={`agent-id-box-${agent.id}`}
+                  id={`agent-id-box-${agent.id || idx}`}
                   onClick={(e) => (e.target as HTMLInputElement).select()}
                 />
               </div>
             </div>
 
-            <h3 className="font-bold text-xl tracking-tight text-slate-900">{agent.name}</h3>
+            <h3 className="font-bold text-xl tracking-tight text-slate-900">{agent.name || `Agent ${agent.id || idx + 1}`}</h3>
             
             {agent.backendUrl && (
               <div className="mb-6 flex items-center gap-2 px-2 py-1 bg-slate-50 border border-slate-100 rounded text-[9px] text-slate-400 font-mono overflow-hidden whitespace-nowrap text-ellipsis">
