@@ -112,7 +112,8 @@ export default function AgentsTab({
 
           {agents.map((agent, idx) => {
             const isSelected = currentTab === agent.id;
-            const isPrimary = agent.isDefault || agent.is_primary;
+            const isPrimary = agent.isDefault === true || agent.is_primary === true;
+            const isActive = agent.isActive === true;
             return (
               <button
                 key={agent.id ? `nav-agent-${agent.id}` : `nav-agent-idx-${idx}`}
@@ -124,7 +125,7 @@ export default function AgentsTab({
                 }`}
                 id={`tab-agent-${agent.id || idx}`}
               >
-                <div className={`w-2 h-2 rounded-full ${agent.isActive ? 'bg-emerald-400' : 'bg-slate-300'}`} />
+                <div className={`w-2 h-2 rounded-full ${isActive ? 'bg-emerald-400' : 'bg-slate-300'}`} />
                 <span className="truncate max-w-[140px]">{agent.name || `Agent ${agent.id || idx + 1}`}</span>
                 {isPrimary && (
                   <span className={`text-[9px] px-1.5 py-0.2 font-black uppercase tracking-wider rounded ${
@@ -229,7 +230,7 @@ export default function AgentsTab({
                           <h3 className="font-bold text-lg tracking-tight text-slate-900 truncate">
                             {agent.name || `Agent ${agent.id || idx + 1}`}
                           </h3>
-                          {(agent.isDefault || agent.is_primary) && (
+                          {(agent.isDefault === true || agent.is_primary === true) && (
                             <span className="text-[9px] px-2 py-0.5 font-black uppercase tracking-wider rounded bg-blue-50 text-blue-600 border border-blue-100 shrink-0">
                               Primary
                             </span>
@@ -273,12 +274,12 @@ export default function AgentsTab({
                         <button 
                           onClick={() => handleSetDefaultAgent(agent.id)}
                           className={`px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${
-                            (agent.isDefault || agent.is_primary) 
+                            (agent.isDefault === true || agent.is_primary === true) 
                               ? 'bg-blue-600 text-white' 
                               : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                           }`}
                         >
-                          {(agent.isDefault || agent.is_primary) ? 'Primary' : 'Make Primary'}
+                          {(agent.isDefault === true || agent.is_primary === true) ? 'Primary' : 'Make Primary'}
                         </button>
                         <button 
                           disabled={!agent.isActive || !agent.backendUrl || diagnosticsMap[agent.id]?.loading}
@@ -331,7 +332,7 @@ export default function AgentsTab({
                     }`}>
                       {activeAgent.isActive ? 'Operational' : 'Deactivated'}
                     </span>
-                    {(activeAgent.isDefault || activeAgent.is_primary) && (
+                    {(activeAgent.isDefault === true || activeAgent.is_primary === true) && (
                       <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-50 text-blue-600 border border-blue-100">
                         Primary Default
                       </span>
@@ -348,12 +349,12 @@ export default function AgentsTab({
                 <button
                   onClick={() => handleSetDefaultAgent(activeAgent.id)}
                   className={`px-3 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${
-                    (activeAgent.isDefault || activeAgent.is_primary)
+                    (activeAgent.isDefault === true || activeAgent.is_primary === true)
                       ? 'bg-blue-600 text-white shadow-md shadow-blue-500/10'
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                   }`}
                 >
-                  {(activeAgent.isDefault || activeAgent.is_primary) ? 'Default Agent' : 'Set as Default'}
+                  {(activeAgent.isDefault === true || activeAgent.is_primary === true) ? 'Default Agent' : 'Set as Default'}
                 </button>
                 <button
                   onClick={() => toggleAgent(activeAgent.id)}

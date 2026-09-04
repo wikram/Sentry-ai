@@ -196,7 +196,8 @@ export default function App() {
       // Update local state if successful
       setAgents(agents.map(a => ({
         ...a,
-        isDefault: a.id === agentId
+        isDefault: a.id === agentId,
+        is_primary: a.id === agentId
       })));
 
     } catch (err) {
@@ -719,9 +720,10 @@ export default function App() {
     const newAgent: RCAAgent = {
       id: assignedId,
       name: agentName,
-      status: 'idle',
-      isActive: false,
-      isDefault: agentIsPrimary || agents.length === 0, // Make first agent or primary agent default automatically
+      status: agentIsActive ? 'idle' : 'complete',
+      isActive: agentIsActive,
+      isDefault: agentIsPrimary,
+      is_primary: agentIsPrimary,
       backendUrl: agentBackendUrl || apiBackendUrl, // Fallback to global backend if empty
       model: agentModel || selectedModel,
       findings: []
@@ -731,7 +733,7 @@ export default function App() {
     setAgents(prev => {
       let updated = prev;
       if (agentIsPrimary) {
-        updated = prev.map(a => ({ ...a, isDefault: false }));
+        updated = prev.map(a => ({ ...a, isDefault: false, is_primary: false }));
       }
       return [...updated, newAgent];
     });
@@ -818,7 +820,7 @@ export default function App() {
           temperature: targetAgent.temperature || 0.2,
           conn_url: targetAgent.backendUrl || '',
           api_key: targetAgent.apiKey || '',
-          is_primary: targetAgent.isDefault || false,
+          is_primary: targetAgent.isDefault === true || targetAgent.is_primary === true,
           is_active: nextActiveState
         })
       });
@@ -829,7 +831,7 @@ export default function App() {
       }
 
       setAgents(agents.map(a => 
-        a.id === id ? { ...a, isActive: nextActiveState } : a
+        a.id === id ? { ...a, isActive: nextActiveState, status: (nextActiveState ? 'idle' : 'complete') as 'idle' | 'complete' } : a
       ));
     } catch (err) {
       console.error('Failed to update agent status:', err);
@@ -905,14 +907,16 @@ export default function App() {
                 model: agentModel, 
                 apiKey: agentApiKey, 
                 isDefault: agentIsPrimary,
-                isActive: agentIsActive
+                is_primary: agentIsPrimary,
+                isActive: agentIsActive,
+                status: (agentIsActive ? 'idle' : 'complete') as 'idle' | 'complete'
               } 
             : a
         );
 
         if (agentIsPrimary) {
           // ensure only this agent is default
-          updated = updated.map(a => a.id === configuringAgentId ? a : { ...a, isDefault: false });
+          updated = updated.map(a => a.id === configuringAgentId ? a : { ...a, isDefault: false, is_primary: false });
         }
 
         return updated;
@@ -939,8 +943,8 @@ export default function App() {
     setAgentBackendUrl(agent.backendUrl || CONFIGURED_BACKEND_URL);
     setAgentModel(agent.model || selectedModel);
     setAgentApiKey(agent.apiKey || 'skprj-xxxxxxxx');
-    setAgentIsPrimary(!!agent.isDefault);
-    setAgentIsActive(agent.isActive !== false);
+    setAgentIsPrimary(agent.isDefault === true || agent.is_primary === true);
+    setAgentIsActive(agent.isActive === true);
     setShowAgentConfigModal(true);
   };
 

@@ -79,6 +79,36 @@ async function fetchWithTimeout(resource: string | URL, options: RequestInit & {
   }
 }
 
+const isStrictlyTrue = (val: any): boolean => {
+  if (val === true || val === 1) return true;
+  if (typeof val === 'string') {
+    const s = val.trim().toLowerCase();
+    return s === 'true' || s === '1' || s === 'yes' || s === 'y' || s === 'primary' || s === 'default' || s === 't';
+  }
+  return false;
+};
+
+const isExplicitlyFalse = (val: any): boolean => {
+  if (val === false || val === 0) return true;
+  if (typeof val === 'string') {
+    const s = val.trim().toLowerCase();
+    return s === 'false' || s === '0' || s === 'no' || s === 'n' || s === 'inactive' || s === 'disabled' || s === 'off' || s === 'f' || s === 'deactivated';
+  }
+  return false;
+};
+
+const parseIsActive = (val: any, fallback: boolean = true): boolean => {
+  if (val === undefined || val === null || val === '') return fallback;
+  if (isExplicitlyFalse(val)) return false;
+  if (isStrictlyTrue(val) || (typeof val === 'string' && (val.trim().toLowerCase() === 'active' || val.trim().toLowerCase() === 'operational' || val.trim().toLowerCase() === 'enabled'))) return true;
+  return Boolean(val);
+};
+
+const parseIsPrimary = (val: any): boolean => {
+  if (val === undefined || val === null || val === '') return false;
+  return isStrictlyTrue(val);
+};
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -111,6 +141,11 @@ async function startServer() {
     const xmlContent = builder.build(initialConfig);
     fs.writeFileSync(CONFIG_PATH, xmlContent);
   }
+
+  // Health endpoint
+  app.get('/api/health', (req, res) => {
+    res.json({ status: 'ok' });
+  });
 
   // Fetch application logs from the configured file
   app.get('/api/logs', (req, res) => {
@@ -560,19 +595,34 @@ async function startServer() {
               if (val === true || val === 1) return true;
               if (typeof val === 'string') {
                 const s = val.trim().toLowerCase();
-                return s === 'true' || s === '1' || s === 'yes' || s === 'y' || s === 'primary' || s === 'default';
+                return s === 'true' || s === '1' || s === 'yes' || s === 'y' || s === 'primary' || s === 'default' || s === 't';
               }
               return false;
             };
 
-            const isNotFalse = (val: any): boolean => {
-              if (val === undefined || val === null) return true;
-              if (val === false || val === 0) return false;
+            const isExplicitlyFalse = (val: any): boolean => {
+              if (val === false || val === 0) return true;
               if (typeof val === 'string') {
                 const s = val.trim().toLowerCase();
-                return s !== 'false' && s !== '0' && s !== 'no' && s !== 'inactive';
+                return s === 'false' || s === '0' || s === 'no' || s === 'n' || s === 'inactive' || s === 'disabled' || s === 'off' || s === 'f' || s === 'deactivated';
               }
+              return false;
+            };
+
+            const parseIsActive = (val: any, fallback: boolean = true): boolean => {
+              if (val === undefined || val === null || val === '') return fallback;
+              if (isExplicitlyFalse(val)) return false;
+              if (isTruthy(val) || (typeof val === 'string' && (val.trim().toLowerCase() === 'active' || val.trim().toLowerCase() === 'operational' || val.trim().toLowerCase() === 'enabled'))) return true;
               return Boolean(val);
+            };
+
+            const parseIsPrimary = (val: any): boolean => {
+              if (val === undefined || val === null || val === '') return false;
+              return isTruthy(val);
+            };
+
+            const isNotFalse = (val: any): boolean => {
+              return parseIsActive(val, true);
             };
 
             const parseAgentField = (val: any): string => {
@@ -753,6 +803,25 @@ async function startServer() {
 
             const mappedAgents = extractedItems.map((a: any, idx: number) => {
               if (Array.isArray(a)) {
+                // Check if items are key-value formatted strings: ['id=1', 'name=Agent 1', ...]
+                if (a.some(item => typeof item === 'string' && item.includes('='))) {
+                  const obj: Record<string, any> = {};
+                  for (const item of a) {
+                    const s = String(item).trim();
+                    if (s.includes('=')) {
+                      const parts = s.split('=');
+                      const k = parts.shift()?.trim() || '';
+                      const v = parts.join('=').trim();
+                      obj[k] = cleanQuote(v);
+                    }
+                  }
+                  if (Object.keys(obj).length > 0) {
+                    a = obj;
+                  }
+                }
+              }
+
+              if (Array.isArray(a)) {
                 const rawIdVal = parseAgentField(a[0]);
                 let id = sanitizeAgentId(rawIdVal, idx + 1);
                 if (seenIds.has(id)) {
@@ -763,14 +832,57 @@ async function startServer() {
                 const rawNameVal = parseAgentField(a[1]);
                 const nameVal = sanitizeAgentName(rawNameVal, id);
                 const modelVal = parseAgentField(a[2]);
-                const rawAgentBackendUrl = parseAgentField(a[3]);
-                const apiKeyVal = parseAgentField(a[4]);
-                const isPrimaryVal = parseAgentField(a[5]);
-                const isActiveVal = parseAgentField(a[6]);
 
-                const isPrimary = isTruthy(isPrimaryVal) || isTruthy(a[5]);
-                const isActive = isNotFalse(isActiveVal) && isNotFalse(a[6]);
-                const agentBackendUrl = (rawAgentBackendUrl && rawAgentBackendUrl !== '0.2' && isNaN(Number(rawAgentBackendUrl))) ? rawAgentBackendUrl : '';
+                let agentBackendUrl = '';
+                let apiKeyVal = '';
+                let rawPrimaryVal: any = undefined;
+                let rawActiveVal: any = undefined;
+
+                const isFloatTemp = (val: any) => {
+                  if (val === undefined || val === null) return false;
+                  const s = String(val).trim();
+                  const n = Number(s);
+                  return !isNaN(n) && (s.includes('.') || s === '0' || s === '1' || s === '2') && n >= 0 && n <= 2.0;
+                };
+
+                if (a.length >= 8) {
+                  // [id, name, llm_model, temperature, conn_url, api_key, is_primary, is_active]
+                  const rawAgentBackendUrl = parseAgentField(a[4]);
+                  agentBackendUrl = (rawAgentBackendUrl && !isFloatTemp(rawAgentBackendUrl)) ? rawAgentBackendUrl : '';
+                  apiKeyVal = parseAgentField(a[5]);
+                  rawPrimaryVal = a[6];
+                  rawActiveVal = a[7];
+                } else if (a.length === 7) {
+                  if (isFloatTemp(a[3])) {
+                    // [id, name, llm_model, temperature, conn_url, is_primary, is_active]
+                    const rawAgentBackendUrl = parseAgentField(a[4]);
+                    agentBackendUrl = (rawAgentBackendUrl && !isFloatTemp(rawAgentBackendUrl)) ? rawAgentBackendUrl : '';
+                    rawPrimaryVal = a[5];
+                    rawActiveVal = a[6];
+                  } else {
+                    // [id, name, llm_model, conn_url, api_key, is_primary, is_active]
+                    const rawAgentBackendUrl = parseAgentField(a[3]);
+                    agentBackendUrl = (rawAgentBackendUrl && !isFloatTemp(rawAgentBackendUrl)) ? rawAgentBackendUrl : '';
+                    apiKeyVal = parseAgentField(a[4]);
+                    rawPrimaryVal = a[5];
+                    rawActiveVal = a[6];
+                  }
+                } else if (a.length === 6) {
+                  const rawAgentBackendUrl = parseAgentField(a[3]);
+                  agentBackendUrl = (rawAgentBackendUrl && !isFloatTemp(rawAgentBackendUrl)) ? rawAgentBackendUrl : '';
+                  rawPrimaryVal = a[4];
+                  rawActiveVal = a[5];
+                } else if (a.length === 5) {
+                  const rawAgentBackendUrl = parseAgentField(a[3]);
+                  agentBackendUrl = (rawAgentBackendUrl && !isFloatTemp(rawAgentBackendUrl)) ? rawAgentBackendUrl : '';
+                  rawActiveVal = a[4];
+                } else {
+                  const rawAgentBackendUrl = a[3] ? parseAgentField(a[3]) : '';
+                  agentBackendUrl = (rawAgentBackendUrl && !isFloatTemp(rawAgentBackendUrl)) ? rawAgentBackendUrl : '';
+                }
+
+                const isPrimary = parseIsPrimary(rawPrimaryVal);
+                const isActive = parseIsActive(rawActiveVal, false);
 
                 return {
                   id,
@@ -804,8 +916,29 @@ async function startServer() {
                 const backendUrl = (rawBackendUrl && rawBackendUrl !== '0.2' && isNaN(Number(rawBackendUrl))) ? rawBackendUrl : '';
                 const apiKey = cleanQuote(String(a.api_key || a.apiKey || a.key || '').trim());
                 
-                const isPrimary = isTruthy(a.is_primary) || isTruthy(a.isPrimary) || isTruthy(a.is_default) || isTruthy(a.isDefault) || isTruthy(a.primary) || isTruthy(a.default);
-                const isActive = isNotFalse(a.is_active) && isNotFalse(a.isActive) && isNotFalse(a.active);
+                const rawPrimary = a.is_primary !== undefined ? a.is_primary :
+                                   (a.isPrimary !== undefined ? a.isPrimary :
+                                   (a.is_default !== undefined ? a.is_default :
+                                   (a.isDefault !== undefined ? a.isDefault :
+                                   (a.primary !== undefined ? a.primary :
+                                   (a.default !== undefined ? a.default : undefined)))));
+                const isPrimary = parseIsPrimary(rawPrimary);
+
+                const rawActive = a.is_active !== undefined ? a.is_active :
+                                  (a.isActive !== undefined ? a.isActive :
+                                  (a.active !== undefined ? a.active :
+                                  (a.is_enabled !== undefined ? a.is_enabled :
+                                  (a.enabled !== undefined ? a.enabled : undefined))));
+                let isActive = false;
+                if (rawActive !== undefined && rawActive !== null && rawActive !== '') {
+                  isActive = parseIsActive(rawActive, false);
+                } else if (a.status) {
+                  const s = String(a.status).trim().toLowerCase();
+                  isActive = s !== 'inactive' && s !== 'deactivated' && s !== 'disabled' && s !== 'stopped';
+                } else {
+                  isActive = true;
+                }
+
                 const findings = Array.isArray(a.findings) ? a.findings : (Array.isArray(a.findings?.finding) ? a.findings.finding : []);
 
                 return {
@@ -827,10 +960,6 @@ async function startServer() {
             }).filter(Boolean);
 
             if (mappedAgents.length > 0) {
-              if (!mappedAgents.some(a => a.isDefault || a.is_primary)) {
-                mappedAgents[0].isDefault = true;
-                mappedAgents[0].is_primary = true;
-              }
               console.log(`Successfully mapped ${mappedAgents.length} agents from backend:`, JSON.stringify(mappedAgents));
               return res.json(mappedAgents);
             }
@@ -859,14 +988,21 @@ async function startServer() {
         ? (Array.isArray(jsonObj.configuration.agents.agent) ? jsonObj.configuration.agents.agent : [jsonObj.configuration.agents.agent])
         : [];
 
-      const normalizedAgents = agents.map((a: any) => ({
-        ...a,
-        id: String(a.id || '').replace(/^agent-/, '').trim(),
-        status: a.status || (a.isActive === 'false' || a.isActive === false ? 'Inactive' : 'idle'),
-        isActive: a.isActive === 'true' || a.isActive === true,
-        isDefault: a.isDefault === 'true' || a.isDefault === true,
-        findings: Array.isArray(a.findings?.finding) ? a.findings.finding : (a.findings?.finding ? [a.findings.finding] : [])
-      }));
+      const normalizedAgents = agents.map((a: any) => {
+        const rawPrimary = a.is_primary !== undefined ? a.is_primary : (a.isPrimary !== undefined ? a.isPrimary : a.isDefault);
+        const rawActive = a.is_active !== undefined ? a.is_active : (a.isActive !== undefined ? a.isActive : a.active);
+        const isPrimary = parseIsPrimary(rawPrimary);
+        const isActive = parseIsActive(rawActive, false);
+        return {
+          ...a,
+          id: String(a.id || '').replace(/^agent-/, '').trim(),
+          status: a.status || (isActive ? 'idle' : 'Inactive'),
+          isActive,
+          isDefault: isPrimary,
+          is_primary: isPrimary,
+          findings: Array.isArray(a.findings?.finding) ? a.findings.finding : (a.findings?.finding ? [a.findings.finding] : [])
+        };
+      });
 
       res.json(normalizedAgents);
     } catch (error) {

@@ -9,19 +9,34 @@ export const isTruthy = (val: any): boolean => {
   if (val === true || val === 1) return true;
   if (typeof val === 'string') {
     const s = val.trim().toLowerCase();
-    return s === 'true' || s === '1' || s === 'yes' || s === 'y' || s === 'primary' || s === 'default';
+    return s === 'true' || s === '1' || s === 'yes' || s === 'y' || s === 'primary' || s === 'default' || s === 't';
   }
   return false;
 };
 
-export const isNotFalse = (val: any): boolean => {
-  if (val === undefined || val === null) return true;
-  if (val === false || val === 0) return false;
+export const isExplicitlyFalse = (val: any): boolean => {
+  if (val === false || val === 0) return true;
   if (typeof val === 'string') {
     const s = val.trim().toLowerCase();
-    return s !== 'false' && s !== '0' && s !== 'no' && s !== 'inactive';
+    return s === 'false' || s === '0' || s === 'no' || s === 'n' || s === 'inactive' || s === 'disabled' || s === 'off' || s === 'f' || s === 'deactivated';
   }
+  return false;
+};
+
+export const parseIsActive = (val: any, fallback: boolean = true): boolean => {
+  if (val === undefined || val === null || val === '') return fallback;
+  if (isExplicitlyFalse(val)) return false;
+  if (isTruthy(val) || (typeof val === 'string' && (val.trim().toLowerCase() === 'active' || val.trim().toLowerCase() === 'operational' || val.trim().toLowerCase() === 'enabled'))) return true;
   return Boolean(val);
+};
+
+export const parseIsPrimary = (val: any): boolean => {
+  if (val === undefined || val === null || val === '') return false;
+  return isTruthy(val);
+};
+
+export const isNotFalse = (val: any): boolean => {
+  return parseIsActive(val, true);
 };
 
 export const cleanQuote = (val: any): string => {
@@ -355,7 +370,26 @@ export const normalizeAgentList = (rawData: any): RCAAgent[] => {
     if (!a) return null;
 
     if (Array.isArray(a)) {
-      // Positional tuple: [id, name, model, url, apiKey, isPrimary, isActive]
+      // Check if items are key-value formatted strings: ['id=1', 'name=Agent 1', ...]
+      if (a.some(item => typeof item === 'string' && item.includes('='))) {
+        const obj: Record<string, any> = {};
+        for (const item of a) {
+          const s = String(item).trim();
+          if (s.includes('=')) {
+            const parts = s.split('=');
+            const k = parts.shift()?.trim() || '';
+            const v = parts.join('=').trim();
+            obj[k] = cleanQuote(v);
+          }
+        }
+        if (Object.keys(obj).length > 0) {
+          a = obj;
+        }
+      }
+    }
+
+    if (Array.isArray(a)) {
+      // Positional tuple from database/backend
       const rawIdVal = parseField(a[0]);
       let id = sanitizeAgentId(rawIdVal, idx + 1);
       if (seenIds.has(id)) {
@@ -367,14 +401,58 @@ export const normalizeAgentList = (rawData: any): RCAAgent[] => {
       const name = sanitizeAgentName(rawNameVal, id);
 
       const modelVal = parseField(a[2]);
-      const rawUrl = parseField(a[3]);
-      const apiKeyVal = parseField(a[4]);
-      const isPrimaryVal = parseField(a[5]);
-      const isActiveVal = parseField(a[6]);
 
-      const isPrimary = isTruthy(isPrimaryVal) || isTruthy(a[5]);
-      const isActive = isNotFalse(isActiveVal) && isNotFalse(a[6]);
-      const backendUrl = (rawUrl && rawUrl !== '0.2' && isNaN(Number(rawUrl))) ? rawUrl : '';
+      let backendUrl = '';
+      let apiKeyVal = '';
+      let rawPrimaryVal: any = undefined;
+      let rawActiveVal: any = undefined;
+
+      const isFloatTemp = (val: any) => {
+        if (val === undefined || val === null) return false;
+        const s = String(val).trim();
+        const n = Number(s);
+        return !isNaN(n) && (s.includes('.') || s === '0' || s === '1' || s === '2') && n >= 0 && n <= 2.0;
+      };
+
+      if (a.length >= 8) {
+        // Schema: [id, name, llm_model, temperature, conn_url, api_key, is_primary, is_active]
+        const rawUrl = parseField(a[4]);
+        backendUrl = (rawUrl && !isFloatTemp(rawUrl)) ? rawUrl : '';
+        apiKeyVal = parseField(a[5]);
+        rawPrimaryVal = a[6];
+        rawActiveVal = a[7];
+      } else if (a.length === 7) {
+        if (isFloatTemp(a[3])) {
+          // Schema: [id, name, llm_model, temperature, conn_url, is_primary, is_active]
+          const rawUrl = parseField(a[4]);
+          backendUrl = (rawUrl && !isFloatTemp(rawUrl)) ? rawUrl : '';
+          rawPrimaryVal = a[5];
+          rawActiveVal = a[6];
+        } else {
+          // Schema: [id, name, llm_model, conn_url, api_key, is_primary, is_active]
+          const rawUrl = parseField(a[3]);
+          backendUrl = (rawUrl && !isFloatTemp(rawUrl)) ? rawUrl : '';
+          apiKeyVal = parseField(a[4]);
+          rawPrimaryVal = a[5];
+          rawActiveVal = a[6];
+        }
+      } else if (a.length === 6) {
+        // Schema: [id, name, llm_model, conn_url, is_primary, is_active]
+        const rawUrl = parseField(a[3]);
+        backendUrl = (rawUrl && !isFloatTemp(rawUrl)) ? rawUrl : '';
+        rawPrimaryVal = a[4];
+        rawActiveVal = a[5];
+      } else if (a.length === 5) {
+        const rawUrl = parseField(a[3]);
+        backendUrl = (rawUrl && !isFloatTemp(rawUrl)) ? rawUrl : '';
+        rawActiveVal = a[4];
+      } else {
+        const rawUrl = a[3] ? parseField(a[3]) : '';
+        backendUrl = (rawUrl && !isFloatTemp(rawUrl)) ? rawUrl : '';
+      }
+
+      const isPrimary = parseIsPrimary(rawPrimaryVal);
+      const isActive = parseIsActive(rawActiveVal, false);
 
       return {
         id,
@@ -407,8 +485,30 @@ export const normalizeAgentList = (rawData: any): RCAAgent[] => {
       const backendUrl = (rawBackendUrl && rawBackendUrl !== '0.2' && isNaN(Number(rawBackendUrl))) ? rawBackendUrl : '';
       const apiKey = cleanQuote(String(a.api_key || a.apiKey || a.key || '').trim());
 
-      const isPrimary = isTruthy(a.is_primary) || isTruthy(a.isPrimary) || isTruthy(a.is_default) || isTruthy(a.isDefault) || isTruthy(a.primary) || isTruthy(a.default);
-      const isActive = isNotFalse(a.is_active) && isNotFalse(a.isActive) && isNotFalse(a.active);
+      const rawPrimary = a.is_primary !== undefined ? a.is_primary :
+                         (a.isPrimary !== undefined ? a.isPrimary :
+                         (a.is_default !== undefined ? a.is_default :
+                         (a.isDefault !== undefined ? a.isDefault :
+                         (a.primary !== undefined ? a.primary :
+                         (a.default !== undefined ? a.default : undefined)))));
+      const isPrimary = parseIsPrimary(rawPrimary);
+
+      const rawActive = a.is_active !== undefined ? a.is_active :
+                        (a.isActive !== undefined ? a.isActive :
+                        (a.active !== undefined ? a.active :
+                        (a.is_enabled !== undefined ? a.is_enabled :
+                        (a.enabled !== undefined ? a.enabled : undefined))));
+      let isActive = false;
+      if (rawActive !== undefined && rawActive !== null && rawActive !== '') {
+        isActive = parseIsActive(rawActive, false);
+      } else if (a.status) {
+        const s = String(a.status).trim().toLowerCase();
+        isActive = s !== 'inactive' && s !== 'deactivated' && s !== 'disabled' && s !== 'stopped' && s !== 'complete';
+      } else {
+        // Only if neither is_active nor status is provided at all
+        isActive = true;
+      }
+
       const findings = Array.isArray(a.findings) ? a.findings : (Array.isArray(a.findings?.finding) ? a.findings.finding : []);
 
       return {
@@ -433,16 +533,13 @@ export const normalizeAgentList = (rawData: any): RCAAgent[] => {
         name,
         status: 'idle',
         isActive: true,
+        isDefault: false,
+        is_primary: false,
         findings: []
       };
     }
     return null;
   }).filter((item): item is RCAAgent => item !== null);
-
-  if (mapped.length > 0 && !mapped.some(a => a.isDefault || a.is_primary)) {
-    mapped[0].isDefault = true;
-    mapped[0].is_primary = true;
-  }
 
   return mapped;
 };
