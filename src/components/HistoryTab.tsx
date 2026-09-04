@@ -33,7 +33,11 @@ export interface HistoryItem {
   completed_at?: string;
   timestamp?: string;
   input?: string;
+  input_text?: string;
   output?: string;
+  remediations?: any[];
+  error_message?: string | null;
+  classified_entries?: any;
 }
 
 export interface ExtractedAnalysisData {
@@ -56,19 +60,21 @@ export const extractAnalysisResponse = (raw: any): ExtractedAnalysisData => {
   if (Array.isArray(obj)) {
     obj = obj[0] || {};
   } else if (typeof obj === 'object') {
-    if (Array.isArray(obj.data) && obj.data.length > 0) obj = obj.data[0];
+    if (Array.isArray(obj.history) && obj.history.length > 0) obj = obj.history[0];
+    else if (Array.isArray(obj.data) && obj.data.length > 0) obj = obj.data[0];
     else if (Array.isArray(obj.record) && obj.record.length > 0) obj = obj.record[0];
     else if (Array.isArray(obj.records) && obj.records.length > 0) obj = obj.records[0];
-    else if (Array.isArray(obj.history) && obj.history.length > 0) obj = obj.history[0];
     else if (Array.isArray(obj.results) && obj.results.length > 0) obj = obj.results[0];
+    else if (obj.history && typeof obj.history === 'object' && !Array.isArray(obj.history)) obj = obj.history;
     else if (obj.data && typeof obj.data === 'object' && !Array.isArray(obj.data)) obj = obj.data;
     else if (obj.record && typeof obj.record === 'object' && !Array.isArray(obj.record)) obj = obj.record;
     else if (obj.result && typeof obj.result === 'object' && !Array.isArray(obj.result)) obj = obj.result;
     else if (obj.analysis && typeof obj.analysis === 'object' && !Array.isArray(obj.analysis)) obj = obj.analysis;
   }
 
-  // 2. Resolve input from all possible field names
+  // 2. Resolve input from all possible field names - strictly prioritizing input_text
   const rawInput = 
+    obj.input_text ??
     obj.input ??
     obj.raw_logs ??
     obj.raw_log ??
@@ -85,7 +91,10 @@ export const extractAnalysisResponse = (raw: any): ExtractedAnalysisData => {
     obj.p_input ??
     obj.query ??
     obj.prompt ??
+    raw.input_text ??
     raw.input ??
+    (Array.isArray(raw.history) && raw.history[0]?.input_text ? raw.history[0].input_text : undefined) ??
+    (Array.isArray(raw.history) && raw.history[0]?.input ? raw.history[0].input : undefined) ??
     raw.raw_logs ??
     raw.input_logs ??
     raw.logs ??
@@ -114,12 +123,58 @@ export const extractAnalysisResponse = (raw: any): ExtractedAnalysisData => {
     (typeof raw.analysis === 'string' ? raw.analysis : undefined) ??
     (typeof raw.result === 'string' ? raw.result : undefined);
 
-  if (rawOutput === undefined) {
+  if (rawOutput === undefined || rawOutput === '') {
     if (obj.analysis && typeof obj.analysis === 'object') {
       rawOutput = obj.analysis.report || obj.analysis.output || obj.analysis.summary || obj.analysis;
     } else if (obj.result && typeof obj.result === 'object') {
       rawOutput = obj.result.report || obj.result.output || obj.result.summary || obj.result;
     }
+  }
+
+  // 4. If remediations array is present (as in /api/log-analysis format), format as rich structured report
+  const remediationsList = 
+    (Array.isArray(obj.remediations) && obj.remediations.length > 0 ? obj.remediations : null) ||
+    (Array.isArray(raw.remediations) && raw.remediations.length > 0 ? raw.remediations : null) ||
+    (Array.isArray(raw.history) && Array.isArray(raw.history[0]?.remediations) ? raw.history[0].remediations : null);
+
+  if ((!rawOutput || rawOutput === '' || rawOutput === 'No output report recorded for this entry.') && remediationsList && remediationsList.length > 0) {
+    const formattedBlocks = remediationsList.map((rem: any, idx: number) => {
+      const parts: string[] = [];
+      const sectionHeader = remediationsList.length > 1 ? `## Remediation #${idx + 1}\n\n` : '';
+
+      if (rem.root_cause) {
+        parts.push(`### Root Cause\n${rem.root_cause}`);
+      }
+
+      if (rem.confidence !== undefined && rem.confidence !== null) {
+        const confVal = typeof rem.confidence === 'number' 
+          ? `${Math.round(rem.confidence <= 1 ? rem.confidence * 100 : rem.confidence)}%` 
+          : `${rem.confidence}`;
+        parts.push(`**Confidence**: ${confVal}`);
+      }
+
+      if (Array.isArray(rem.fix_steps) && rem.fix_steps.length > 0) {
+        const stepsText = rem.fix_steps.map((step: any, sIdx: number) => {
+          const stepStr = String(step).trim();
+          return /^\d+\./.test(stepStr) ? stepStr : `${sIdx + 1}. ${stepStr}`;
+        }).join('\n');
+        parts.push(`### Remediation Steps\n${stepsText}`);
+      } else if (rem.fix_steps) {
+        parts.push(`### Remediation Steps\n${rem.fix_steps}`);
+      }
+
+      if (rem.analysis_id) {
+        parts.push(`*Analysis ID: \`${rem.analysis_id}\`*`);
+      }
+
+      return sectionHeader + parts.join('\n\n');
+    });
+
+    rawOutput = formattedBlocks.join('\n\n---\n\n');
+  }
+
+  if (obj.error_message) {
+    rawOutput = `**Error:** ${obj.error_message}\n\n` + (rawOutput || '');
   }
 
   // Format string for input
@@ -150,8 +205,21 @@ export const extractAnalysisResponse = (raw: any): ExtractedAnalysisData => {
     }
   }
 
-  const analysisCode = String(obj.analysis_code || raw.analysis_code || '').trim();
-  const status = String(obj.status || raw.status || 'COMPLETED').trim();
+  const analysisCode = String(
+    obj.analysis_code || 
+    obj.analysis_id || 
+    (remediationsList && remediationsList[0]?.analysis_id) ||
+    raw.analysis_code || 
+    raw.analysis_id || 
+    ''
+  ).trim();
+
+  let rawStatus = obj.status || raw.status;
+  if (typeof rawStatus === 'string' && (rawStatus.toLowerCase() === 'success' || rawStatus.toLowerCase() === 'ok')) {
+    rawStatus = 'COMPLETED';
+  }
+  const status = String(rawStatus || 'COMPLETED').trim();
+
   const model = String(obj.engine_llm_model || obj.model || raw.engine_llm_model || raw.model || '').trim();
   const completedAt = String(obj.completed_at || raw.completed_at || '').trim();
   const inputCharCount = Number(obj.input_char_count || raw.input_char_count || (formattedInput ? formattedInput.length : 0));
@@ -406,7 +474,8 @@ export default function HistoryTab({
               analysis_code: resolvedCode || h.analysis_code || analysisCode,
               status: finalStatus,
               engine_llm_model: extracted.model || h.engine_llm_model,
-              input: extracted.input || h.input,
+              input: extracted.input || h.input_text || h.input,
+              input_text: extracted.input || h.input_text,
               output: extracted.output || h.output,
               input_char_count: extracted.inputCharCount || (extracted.input ? extracted.input.length : h.input_char_count),
               completed_at: extracted.completedAt || h.completed_at
@@ -431,7 +500,8 @@ export default function HistoryTab({
                 analysis_code: resolvedCode || h.analysis_code || analysisCode,
                 status: finalStatus,
                 engine_llm_model: extracted.model || h.engine_llm_model,
-                input: extracted.input || h.input,
+                input: extracted.input || h.input_text || h.input,
+                input_text: extracted.input || h.input_text,
                 output: extracted.output || h.output
               };
             }
@@ -705,7 +775,7 @@ export default function HistoryTab({
       const code = (item.analysis_code || '').toLowerCase();
       const model = (item.engine_llm_model || '').toLowerCase();
       const status = resolveValidStatus(item.status, 'COMPLETED').toLowerCase();
-      const input = (item.input || '').toLowerCase();
+      const input = (item.input_text || item.input || '').toLowerCase();
       const output = (item.output || '').toLowerCase();
       const createdAt = (item.created_at || item.timestamp || '').toLowerCase();
 
@@ -1189,7 +1259,7 @@ export default function HistoryTab({
 
             const displayInput = (itemDetail?.input !== undefined && itemDetail.input !== '') 
               ? itemDetail.input 
-              : (item.input || '');
+              : (item.input_text || item.input || '');
             const displayOutput = (itemDetail?.output !== undefined && itemDetail.output !== '') 
               ? itemDetail.output 
               : (item.output || '');
