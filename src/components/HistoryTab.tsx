@@ -163,10 +163,6 @@ export const extractAnalysisResponse = (raw: any): ExtractedAnalysisData => {
         parts.push(`### Remediation Steps\n${rem.fix_steps}`);
       }
 
-      if (rem.analysis_id) {
-        parts.push(`*Analysis ID: \`${rem.analysis_id}\`*`);
-      }
-
       return sectionHeader + parts.join('\n\n');
     });
 
@@ -203,6 +199,11 @@ export const extractAnalysisResponse = (raw: any): ExtractedAnalysisData => {
     } else {
       formattedOutput = String(rawOutput);
     }
+
+    // Ensure Analysis ID is not displayed in the result output
+    formattedOutput = formattedOutput
+      .replace(/(?:\r?\n)*\s*\*?Analysis ID:?\s*`?[^`\r\n]+`?\*?/gi, '')
+      .trim();
   }
 
   const analysisCode = String(
@@ -1400,11 +1401,6 @@ export default function HistoryTab({
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
                               <h4 className="text-[10px] font-bold text-blue-600 uppercase tracking-widest">Intelligence Report</h4>
-                              {displayOutput ? (
-                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-mono font-bold">
-                                  API Returned
-                                </span>
-                              ) : null}
                             </div>
                             <div className="flex items-center gap-2">
                               {displayOutput && (
