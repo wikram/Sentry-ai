@@ -46,9 +46,28 @@ export interface ExtractedAnalysisData {
   status: string;
   model: string;
   analysisCode: string;
+  analysisId?: string;
   completedAt: string;
   inputCharCount: number;
 }
+
+export const formatAnalysisCode = (code?: string, id?: string, index: number = 0): string => {
+  const isUuid = (val?: string) => !!val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val.trim());
+
+  if (code && typeof code === 'string' && code.trim()) {
+    const trimmed = code.trim();
+    if (trimmed.startsWith('ANL-')) return trimmed;
+    if (!isUuid(trimmed)) return `ANL-${trimmed}`;
+  }
+
+  if (id && typeof id === 'string' && id.trim()) {
+    const trimmed = id.trim();
+    if (trimmed.startsWith('ANL-')) return trimmed;
+    if (!isUuid(trimmed)) return `ANL-${trimmed}`;
+  }
+
+  return `ANL-${index + 1}`;
+};
 
 export const extractAnalysisResponse = (raw: any): ExtractedAnalysisData => {
   if (!raw) {
@@ -206,11 +225,19 @@ export const extractAnalysisResponse = (raw: any): ExtractedAnalysisData => {
       .trim();
   }
 
-  const analysisCode = String(
-    obj.analysis_code || 
+  // Helper to check if string looks like an analysis ID (UUID)
+  const isUuid = (val?: string) => !!val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val.trim());
+
+  let rawAnalysisCode = String(obj.analysis_code || raw.analysis_code || '').trim();
+  // Do not treat an analysis ID / UUID as an analysis code
+  if (isUuid(rawAnalysisCode)) {
+    rawAnalysisCode = '';
+  }
+
+  const analysisCode = rawAnalysisCode;
+  const analysisId = String(
     obj.analysis_id || 
     (remediationsList && remediationsList[0]?.analysis_id) ||
-    raw.analysis_code || 
     raw.analysis_id || 
     ''
   ).trim();
@@ -231,6 +258,7 @@ export const extractAnalysisResponse = (raw: any): ExtractedAnalysisData => {
     status,
     model,
     analysisCode,
+    analysisId,
     completedAt,
     inputCharCount
   };
@@ -444,13 +472,21 @@ export default function HistoryTab({
         console.log(`[HistoryTab] Received /api/log-analysis response for ${analysisCode}:`, data);
 
         const extracted = extractAnalysisResponse(data);
-        const resolvedCode = extracted.analysisCode || analysisCode;
+
+        // Strictly preserve the existing ANL-xxxx code! NEVER replace it with an analysis ID
+        const preservedAnalysisCode = (item.analysis_code && item.analysis_code.startsWith('ANL-'))
+          ? item.analysis_code
+          : (analysisCode && analysisCode.startsWith('ANL-'))
+            ? analysisCode
+            : (extracted.analysisCode && extracted.analysisCode.startsWith('ANL-'))
+              ? extracted.analysisCode
+              : (item.analysis_code || analysisCode);
 
         // Populate detailsMap with extracted data immediately
         setDetailsMap(prev => ({
           ...prev,
           [analysisCode]: extracted,
-          [resolvedCode]: extracted,
+          ...(preservedAnalysisCode ? { [preservedAnalysisCode]: extracted } : {}),
           ...(item.id ? { [String(item.id)]: extracted } : {}),
           ...(item.analysis_code ? { [String(item.analysis_code)]: extracted } : {})
         }));
@@ -463,16 +499,20 @@ export default function HistoryTab({
             (h.id && item.id && String(h.id) === String(item.id)) ||
             (h.analysis_code && item.analysis_code && String(h.analysis_code) === String(item.analysis_code)) ||
             (h.analysis_code && String(h.analysis_code) === String(analysisCode)) ||
-            (h.analysis_code && String(h.analysis_code) === String(resolvedCode)) ||
+            (h.analysis_code && String(h.analysis_code) === String(preservedAnalysisCode)) ||
             (h.id && String(h.id) === String(analysisCode)) ||
-            (h.id && String(h.id) === String(resolvedCode)) ||
             (cleanParam && h.analysis_code && String(h.analysis_code).replace(/^ANL-/, '') === cleanParam);
 
           if (isMatch) {
             const finalStatus = resolveValidStatus(extracted.status, h.status);
+            // Strictly retain the ANL-xxxx analysis code, never replace with analysis ID
+            const itemCode = (h.analysis_code && h.analysis_code.startsWith('ANL-'))
+              ? h.analysis_code
+              : preservedAnalysisCode;
+
             return {
               ...h,
-              analysis_code: resolvedCode || h.analysis_code || analysisCode,
+              analysis_code: itemCode,
               status: finalStatus,
               engine_llm_model: extracted.model || h.engine_llm_model,
               input: extracted.input || h.input_text || h.input,
@@ -492,13 +532,17 @@ export default function HistoryTab({
               (h.id && item.id && String(h.id) === String(item.id)) ||
               (h.analysis_code && item.analysis_code && String(h.analysis_code) === String(item.analysis_code)) ||
               (h.analysis_code && String(h.analysis_code) === String(analysisCode)) ||
-              (h.analysis_code && String(h.analysis_code) === String(resolvedCode)) ||
+              (h.analysis_code && String(h.analysis_code) === String(preservedAnalysisCode)) ||
               (h.id && String(h.id) === String(analysisCode));
             if (isMatch) {
               const finalStatus = resolveValidStatus(extracted.status, h.status);
+              const itemCode = (h.analysis_code && h.analysis_code.startsWith('ANL-'))
+                ? h.analysis_code
+                : preservedAnalysisCode;
+
               return {
                 ...h,
-                analysis_code: resolvedCode || h.analysis_code || analysisCode,
+                analysis_code: itemCode,
                 status: finalStatus,
                 engine_llm_model: extracted.model || h.engine_llm_model,
                 input: extracted.input || h.input_text || h.input,
@@ -522,16 +566,11 @@ export default function HistoryTab({
 
   const handleResultClick = (item: HistoryItem, displayCode: string) => {
     // Determine the analysis code guaranteed to start with ANL-
-    let analysisCode = item.analysis_code || '';
-    if (!analysisCode.startsWith('ANL-')) {
-      if (item.id && typeof item.id === 'string' && item.id.startsWith('ANL-')) {
-        analysisCode = item.id;
-      } else if (displayCode && displayCode.startsWith('ANL-')) {
-        analysisCode = displayCode;
-      } else {
-        analysisCode = `ANL-${item.analysis_code || item.id || Date.now()}`;
-      }
-    }
+    const analysisCode = (item.analysis_code && item.analysis_code.startsWith('ANL-'))
+      ? item.analysis_code
+      : (displayCode && displayCode.startsWith('ANL-'))
+        ? displayCode
+        : formatAnalysisCode(item.analysis_code, item.id, 0);
 
     // Toggle item expansion
     toggleExpand(item, displayCode);
@@ -567,16 +606,21 @@ export default function HistoryTab({
 
       // Merge local frontend analysis history items if any exist that aren't in fetchedItems
       const mergedMap = new Map<string, HistoryItem>();
-      fetchedItems.forEach(item => {
-        mergedMap.set(item.id || item.analysis_code || Math.random().toString(), item);
+      fetchedItems.forEach((item, idx) => {
+        const safeCode = formatAnalysisCode(item.analysis_code, item.id, idx);
+        mergedMap.set(item.id || safeCode || Math.random().toString(), {
+          ...item,
+          analysis_code: safeCode
+        });
       });
 
-      analysisHistory.forEach(localItem => {
-        const key = localItem.id || localItem.analysis_code || Math.random().toString();
+      analysisHistory.forEach((localItem, idx) => {
+        const safeCode = formatAnalysisCode(localItem.analysis_code, localItem.id, idx);
+        const key = localItem.id || safeCode || Math.random().toString();
         if (!mergedMap.has(key)) {
           mergedMap.set(key, {
             id: localItem.id,
-            analysis_code: localItem.analysis_code || localItem.id,
+            analysis_code: safeCode,
             status: localItem.status || 'COMPLETED',
             input_char_count: localItem.input_char_count || localItem.input?.length || 0,
             engine_llm_model: localItem.engine_llm_model || 'openai/gpt-4o',
@@ -596,7 +640,10 @@ export default function HistoryTab({
       
       // Fallback to prop history if API call fails
       if (analysisHistory && analysisHistory.length > 0) {
-        setHistoryList(analysisHistory);
+        setHistoryList(analysisHistory.map((item, idx) => ({
+          ...item,
+          analysis_code: formatAnalysisCode(item.analysis_code, item.id, idx)
+        })));
       }
     } finally {
       setIsLoading(false);
@@ -1242,7 +1289,7 @@ export default function HistoryTab({
       ) : (
         <div className="space-y-3">
           {currentPaginatedItems.map((item, idx) => {
-            const displayCode = item.analysis_code || item.id || `ANL-${idx + 1}`;
+            const displayCode = formatAnalysisCode(item.analysis_code, item.id, (currentPage - 1) * pageSize + idx);
             const itemKey = item.id || displayCode || `item-${idx}`;
 
             // Check expansion against all identifiers
