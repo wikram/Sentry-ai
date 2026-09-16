@@ -6,6 +6,7 @@ import { XMLParser, XMLBuilder } from 'fast-xml-parser';
 import yaml from 'js-yaml';
 import multer from 'multer';
 import dotenv from 'dotenv';
+import { createConfigMgmtRouter } from './server/configMgmtRoutes';
 
 dotenv.config();
 
@@ -1502,7 +1503,7 @@ async function callOpenRouterAI(logs: string, description: string, modelOverride
       'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
       'HTTP-Referer': process.env.APP_URL || 'http://localhost:3000',
-      'X-Title': 'Sentry Log Analyzer'
+      'X-Title': 'Devops Studio Log Analyzer'
     },
     body: JSON.stringify({
       model: model,
@@ -2039,6 +2040,9 @@ const initialAnalysisHistory: any[] = [
 
   app.get('/api/log-analysis', handleLogAnalysis);
   app.post('/api/log-analysis', handleLogAnalysis);
+
+  // Configuration Management Real Data API
+  app.use('/api/config-mgmt', createConfigMgmtRouter());
 
   // Vite middleware
   if (process.env.NODE_ENV !== 'production') {

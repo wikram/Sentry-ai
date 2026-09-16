@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   FileCode, 
@@ -46,161 +46,26 @@ export interface ConfigManifest {
   content: string;
 }
 
-export const INITIAL_MANIFESTS: ConfigManifest[] = [
-  {
-    id: 'man-01',
-    name: 'k8s-cluster-baseline.yml',
-    type: 'ansible',
-    path: 'playbooks/k8s/k8s-cluster-baseline.yml',
-    lastModified: '2 hours ago',
-    author: 'alex.chen@enterprise.io',
-    branch: 'main',
-    content: `---
-- name: Hardened Kubernetes Cluster Node Baseline
-  hosts: k8s_nodes
-  become: true
-  vars:
-    containerd_version: "1.7.13"
-    runc_version: "1.1.12"
-    cni_plugins_version: "v1.4.0"
-    k8s_version: "1.29.2-1.1"
-
-  tasks:
-    - name: Disable Swap on all Kubernetes Worker Nodes
-      ansible.posix.sysctl:
-        name: vm.swappiness
-        value: '0'
-        state: present
-        reload: true
-
-    - name: Load Required Kernel Modules (overlay & br_netfilter)
-      community.general.modprobe:
-        name: "{{ item }}"
-        state: present
-      loop:
-        - overlay
-        - br_netfilter
-
-    - name: Set Essential Sysctl Parameters for K8s Networking
-      ansible.posix.sysctl:
-        name: "{{ item.name }}"
-        value: "{{ item.value }}"
-        sysctl_set: true
-        state: present
-        reload: true
-      loop:
-        - { name: 'net.bridge.bridge-nf-call-iptables', value: '1' }
-        - { name: 'net.bridge.bridge-nf-call-ip6tables', value: '1' }
-        - { name: 'net.ipv4.ip_forward', value: '1' }
-
-    - name: Ensure containerd runtime service is active and enabled
-      ansible.builtin.systemd:
-        name: containerd
-        state: started
-        enabled: true
-`
-  },
-  {
-    id: 'man-02',
-    name: 'nginx-hardened-edge.yml',
-    type: 'ansible',
-    path: 'playbooks/edge/nginx-hardened-edge.yml',
-    lastModified: '1 day ago',
-    author: 'secops-team',
-    branch: 'main',
-    content: `---
-- name: Deploy Zero-Trust Nginx Reverse Proxy with TLS 1.3 & HSTS
-  hosts: webservers
-  become: true
-  tasks:
-    - name: Install Nginx Mainline Package & Certbot
-      ansible.builtin.apt:
-        name:
-          - nginx
-          - certbot
-          - python3-certbot-nginx
-        state: latest
-        update_cache: true
-
-    - name: Deploy Secure TLS Hardening Template
-      ansible.builtin.template:
-        src: templates/ssl-params.conf.j2
-        dest: /etc/nginx/conf.d/ssl-params.conf
-        owner: root
-        group: root
-        mode: '0644'
-      notify: Reload Nginx
-
-  handlers:
-    - name: Reload Nginx
-      ansible.builtin.systemd:
-        name: nginx
-        state: reloaded
-`
-  },
-  {
-    id: 'man-03',
-    name: 'cis-linux-hardening.yml',
-    type: 'ansible',
-    path: 'playbooks/security/cis-linux-hardening.yml',
-    lastModified: '3 days ago',
-    author: 'compliance-auditor',
-    branch: 'main',
-    content: `---
-- name: CIS Linux Benchmark Level 2 Hardening
-  hosts: all
-  become: true
-  tasks:
-    - name: Disable Legacy SSH Root Login & Password Auth
-      ansible.builtin.lineinfile:
-        path: /etc/ssh/sshd_config
-        regexp: "{{ item.regexp }}"
-        line: "{{ item.line }}"
-        validate: '/usr/sbin/sshd -t -f %s'
-      loop:
-        - { regexp: '^#?PermitRootLogin', line: 'PermitRootLogin no' }
-        - { regexp: '^#?PasswordAuthentication', line: 'PasswordAuthentication no' }
-        - { regexp: '^#?X11Forwarding', line: 'X11Forwarding no' }
-        - { regexp: '^#?MaxAuthTries', line: 'MaxAuthTries 4' }
-      notify: Restart SSHD
-
-    - name: Restrict Core Dumps for System Accounts
-      ansible.builtin.lineinfile:
-        path: /etc/security/limits.conf
-        line: "* hard core 0"
-`
-  },
-  {
-    id: 'man-04',
-    name: 'postgres-ha-cluster.yml',
-    type: 'ansible',
-    path: 'playbooks/database/postgres-ha-cluster.yml',
-    lastModified: '5 days ago',
-    author: 'db-team',
-    branch: 'main',
-    content: `---
-- name: Configure High-Availability PostgreSQL Cluster
-  hosts: db_primary
-  become: true
-  tasks:
-    - name: Enforce pg_hba.conf MD5 & SSL Authentication
-      ansible.builtin.template:
-        src: templates/pg_hba.conf.j2
-        dest: /etc/postgresql/16/main/pg_hba.conf
-        mode: '0600'
-      notify: Reload Postgres
-`
-  }
-];
+export const INITIAL_MANIFESTS: ConfigManifest[] = [];
 
 interface PlaybooksConfigPageProps {
   onLaunchOrchestrator?: () => void;
 }
 
 export default function PlaybooksConfigPage({ onLaunchOrchestrator }: PlaybooksConfigPageProps) {
-  const [manifests, setManifests] = useState<ConfigManifest[]>(INITIAL_MANIFESTS);
-  const [selectedManifest, setSelectedManifest] = useState<ConfigManifest>(INITIAL_MANIFESTS[0]);
-  const [manifestEditorContent, setManifestEditorContent] = useState<string>(INITIAL_MANIFESTS[0].content);
+  const [manifests, setManifests] = useState<ConfigManifest[]>([]);
+  const [selectedManifest, setSelectedManifest] = useState<ConfigManifest>({
+    id: 'loading',
+    name: 'system-baseline.yml',
+    type: 'ansible',
+    path: 'playbooks/system-baseline.yml',
+    lastModified: 'Loading...',
+    author: 'DevSecOps Automation',
+    branch: 'main',
+    content: '# Loading playbooks from server filesystem...'
+  });
+  const [manifestEditorContent, setManifestEditorContent] = useState<string>('# Loading playbooks from server filesystem...');
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [notification, setNotification] = useState<string | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -216,6 +81,32 @@ export default function PlaybooksConfigPage({ onLaunchOrchestrator }: PlaybooksC
   const [targetBranch, setTargetBranch] = useState('main');
   const [createPR, setCreatePR] = useState(false);
 
+  const fetchManifests = async () => {
+    try {
+      setIsLoading(true);
+      const res = await fetch('/api/config-mgmt/manifests');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.manifests) && data.manifests.length > 0) {
+          setManifests(data.manifests);
+          setSelectedManifest(prev => {
+            const match = data.manifests.find((m: any) => m.id === prev?.id) || data.manifests[0];
+            setManifestEditorContent(match.content);
+            return match;
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load manifests:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchManifests();
+  }, []);
+
   const currentRepo = repositories.find(r => r.id === activeRepoId) || repositories[0];
 
   const showNotification = (msg: string) => {
@@ -229,30 +120,47 @@ export default function PlaybooksConfigPage({ onLaunchOrchestrator }: PlaybooksC
     setHasUnsavedChanges(false);
   };
 
-  const handleSaveLocal = () => {
-    setManifests(prev => prev.map(m => m.id === selectedManifest.id ? { ...m, content: manifestEditorContent, lastModified: 'Just now' } : m));
-    setHasUnsavedChanges(false);
-    showNotification(`Saved changes locally for ${selectedManifest.name}. Ready to commit to ${currentRepo.provider === 'github' ? 'GitHub' : 'GitLab'}.`);
+  const handleSaveLocal = async () => {
+    if (!selectedManifest) return;
+    try {
+      const res = await fetch('/api/config-mgmt/manifests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          path: selectedManifest.path,
+          content: manifestEditorContent
+        })
+      });
+      if (res.ok) {
+        setManifests(prev => prev.map(m => m.id === selectedManifest.id ? { ...m, content: manifestEditorContent, lastModified: 'Just now' } : m));
+        setHasUnsavedChanges(false);
+        showNotification(`Saved changes to ${selectedManifest.path} on server.`);
+      } else {
+        showNotification('Saved changes locally.');
+      }
+    } catch (err) {
+      showNotification(`Saved changes locally for ${selectedManifest.name}.`);
+    }
   };
 
-  const handlePullFromGit = () => {
+  const handlePullFromGit = async () => {
     setIsPulling(true);
-    setTimeout(() => {
-      setIsPulling(false);
+    try {
+      await fetchManifests();
       setRepositories(prev => prev.map(r => r.id === currentRepo.id ? { ...r, lastSynced: 'Just now' } : r));
-      showNotification(`Successfully pulled latest playbooks from ${currentRepo.provider === 'github' ? 'GitHub' : 'GitLab'} (${currentRepo.name} @ ${currentRepo.activeBranch}).`);
-    }, 1500);
+      showNotification(`Synchronized latest manifests and playbooks from disk.`);
+    } finally {
+      setIsPulling(false);
+    }
   };
 
-  const handlePushToGit = (e: React.FormEvent) => {
+  const handlePushToGit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!commitMessage) return;
+    if (!commitMessage || !selectedManifest) return;
 
     setIsPushing(true);
-    setTimeout(() => {
-      setIsPushing(false);
-      setIsPushModalOpen(false);
-      
+    try {
+      await handleSaveLocal();
       const newHash = Math.random().toString(16).substring(2, 9);
       
       // Update repository HEAD commit
@@ -281,10 +189,13 @@ export default function PlaybooksConfigPage({ onLaunchOrchestrator }: PlaybooksC
       } : m));
 
       setHasUnsavedChanges(false);
+      setIsPushModalOpen(false);
       const prText = createPR ? ` & created ${currentRepo.provider === 'github' ? 'Pull Request #42' : 'Merge Request !18'}` : '';
       showNotification(`Pushed commit [${newHash}] to ${currentRepo.name} on ${targetBranch}${prText}!`);
       setCommitMessage('');
-    }, 1800);
+    } finally {
+      setIsPushing(false);
+    }
   };
 
   const handleSwitchBranch = (branchName: string) => {

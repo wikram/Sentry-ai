@@ -49,7 +49,7 @@ export function getInitials(emailOrName: string): string {
 }
 
 const PRESET_BG_COLORS = [
-  { name: 'Sentry Blue', class: 'bg-blue-600', hex: '#2563eb' },
+  { name: 'Studio Blue', class: 'bg-blue-600', hex: '#2563eb' },
   { name: 'Indigo', class: 'bg-indigo-600', hex: '#4f46e5' },
   { name: 'Violet', class: 'bg-purple-600', hex: '#9333ea' },
   { name: 'Emerald', class: 'bg-emerald-600', hex: '#059669' },
@@ -63,7 +63,7 @@ const PRESET_AVATARS = [
   { id: 'admin', label: 'System Admin', icon: '⚡' },
   { id: 'security', label: 'Security Specialist', icon: '🛡️' },
   { id: 'sre', label: 'SRE Specialist', icon: '🚀' },
-  { id: 'sentry', label: 'Sentry Bot', icon: '🤖' },
+  { id: 'studio-bot', label: 'Studio Bot', icon: '🤖' },
 ];
 
 export default function UserDropdownMenu({ user, onSignOut }: UserDropdownMenuProps) {
@@ -82,9 +82,9 @@ export default function UserDropdownMenu({ user, onSignOut }: UserDropdownMenuPr
     }
     const defaultInitials = user?.email ? getInitials(user.email) : 'AD';
     return {
-      email: user?.email || 'admin@sentry.local',
+      email: user?.email || 'admin@devopsstudio.local',
       displayName: user?.email ? user.email.split('@')[0].replace(/[._\-]/g, ' ') : 'Administrator',
-      role: 'Sentry Admin / SRE',
+      role: 'Devops Studio Admin / SRE',
       initials: defaultInitials,
       bgColor: 'bg-blue-600',
       timezone: 'UTC (GMT+0)',
@@ -303,7 +303,7 @@ export default function UserDropdownMenu({ user, onSignOut }: UserDropdownMenuPr
               </div>
               <p className="text-[11px] text-slate-500 truncate font-mono">{profile.email}</p>
               <span className="inline-block mt-1 px-2 py-0.5 bg-blue-50 text-blue-700 font-extrabold text-[9px] uppercase tracking-wider rounded-md border border-blue-100">
-                {profile.role || 'Sentry Admin'}
+                {profile.role || 'Devops Studio Admin'}
               </span>
             </div>
           </div>
@@ -357,7 +357,7 @@ export default function UserDropdownMenu({ user, onSignOut }: UserDropdownMenuPr
                 <Shield size={14} />
               </div>
               <div className="flex-1">
-                <div className="font-semibold">Sentry API Token</div>
+                <div className="font-semibold">Devops Studio API Token</div>
                 <div className="text-[10px] text-slate-400 font-normal">API credentials for CLI & triggers</div>
               </div>
             </button>
@@ -722,7 +722,7 @@ export default function UserDropdownMenu({ user, onSignOut }: UserDropdownMenuPr
                 <label className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer">
                   <div className="flex items-center gap-2.5">
                     <RefreshCw size={14} className="text-purple-600" />
-                    <span className="text-xs font-semibold text-slate-700">Sentry Build Failure Scraper</span>
+                    <span className="text-xs font-semibold text-slate-700">Devops Studio Build Failure Scraper</span>
                   </div>
                   <input type="checkbox" defaultChecked className="rounded border-slate-300 text-purple-600 focus:ring-purple-500 h-4 w-4" />
                 </label>
@@ -753,7 +753,7 @@ export default function UserDropdownMenu({ user, onSignOut }: UserDropdownMenuPr
                   <Shield size={20} />
                 </div>
                 <div>
-                  <h2 className="text-base font-bold text-slate-800">Sentry User API Token</h2>
+                  <h2 className="text-base font-bold text-slate-800">Devops Studio User API Token</h2>
                   <p className="text-xs text-slate-400">Use for CLI, scripts & pipeline authentication</p>
                 </div>
               </div>
@@ -791,7 +791,7 @@ export default function UserDropdownMenu({ user, onSignOut }: UserDropdownMenuPr
                   <Shield size={14} className="text-amber-600" /> Security Recommendation
                 </div>
                 <p className="text-[11px] leading-relaxed text-amber-700">
-                  Keep your API token private. It grants programmatic access to Sentry triggers and RCA agent diagnostic endpoints.
+                  Keep your API token private. It grants programmatic access to Devops Studio triggers and RCA agent diagnostic endpoints.
                 </p>
               </div>
 

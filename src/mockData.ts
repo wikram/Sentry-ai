@@ -11,11 +11,11 @@ export const MOCK_SOURCES: DataSource[] = [
   },
   {
     id: 'src-2',
-    name: 'Sentry CI/CD',
+    name: 'Devops Studio CI/CD',
     type: 'jenkins',
     status: 'syncing',
     lastSync: '2026-05-09T11:00:00Z',
-    config: { url: 'https://sentry.internal' }
+    config: { url: 'https://cicd.internal' }
   },
   {
     id: 'src-3',

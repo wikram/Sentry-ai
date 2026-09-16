@@ -1476,7 +1476,7 @@ export default function App() {
             >
               <div className="p-6 border-b border-slate-100 bg-slate-50/50">
                 <h3 className="text-lg font-bold tracking-tight text-slate-900">Add Data Source</h3>
-                <p className="text-xs text-slate-400 font-medium">Select a tool to integrate with Sentry analysis</p>
+                <p className="text-xs text-slate-400 font-medium">Select a tool to integrate with Devops Studio analysis</p>
               </div>
               <div className="p-6 space-y-6">
                 <div className="space-y-4">
@@ -1490,7 +1490,7 @@ export default function App() {
                       <option value="" disabled>Select a tool...</option>
                       <optgroup label="Infrastructure & CI/CD">
                         <option value="kubernetes">Kubernetes Cluster</option>
-                        <option value="jenkins">Sentry CI/CD / Error Tracking</option>
+                        <option value="jenkins">CI/CD / Pipeline Error Tracking</option>
                         <option value="github">GitHub Actions</option>
                         <option value="gitlab">GitLab Pipeline</option>
                         <option value="sonarqube">SonarQube</option>
@@ -1522,7 +1522,7 @@ export default function App() {
                       type="text" 
                       value={sourceName}
                       onChange={(e) => setSourceName(e.target.value)}
-                      placeholder="e.g. Staging Sentry"
+                      placeholder="e.g. Production Cluster / CI Runner"
                       className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
                     />
                   </div>

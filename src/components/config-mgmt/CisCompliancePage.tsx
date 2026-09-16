@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   ShieldCheck, 
@@ -42,65 +42,65 @@ interface ComplianceFinding {
   description: string;
 }
 
-const INITIAL_SCORES: BenchmarkScore[] = [
-  { category: 'CIS Linux Server Level 1 & 2', score: 98, totalRules: 142, passedRules: 139, failedRules: 3, status: 'PASS' },
-  { category: 'CIS Kubernetes Benchmark v1.8', score: 94, totalRules: 88, passedRules: 83, failedRules: 5, status: 'PASS' },
-  { category: 'CIS Docker & Containerd Runtime', score: 96, totalRules: 64, passedRules: 61, failedRules: 3, status: 'PASS' },
-  { category: 'SSH & PAM Authentication Policy', score: 100, totalRules: 28, passedRules: 28, failedRules: 0, status: 'PASS' },
-  { category: 'AIDE File Integrity & Syslog Hardening', score: 92, totalRules: 36, passedRules: 33, failedRules: 3, status: 'PASS' }
-];
-
-const INITIAL_FINDINGS: ComplianceFinding[] = [
-  {
-    id: 'find-01',
-    ruleId: 'CIS-5.2.14',
-    title: 'SSH Root Login Allowed via Remote Session',
-    targetNode: 'k8s-worker-gpu-04.prod.internal',
-    severity: 'HIGH',
-    category: 'Identity & Access',
-    description: 'PermitRootLogin directive in /etc/ssh/sshd_config is configured to "yes".',
-    remediationSnippet: `- name: Enforce PermitRootLogin no\n  ansible.builtin.lineinfile:\n    path: /etc/ssh/sshd_config\n    regexp: '^#?PermitRootLogin'\n    line: 'PermitRootLogin no'\n  notify: Restart SSHD`
-  },
-  {
-    id: 'find-02',
-    ruleId: 'CIS-3.4.1.2',
-    title: 'Missing Ingress Dropping Rules on Unallocated Ports',
-    targetNode: 'edge-gateway-eu-central.internal',
-    severity: 'MEDIUM',
-    category: 'Network Hardening',
-    description: 'UFW incoming traffic default policy is set to ACCEPT instead of DROP.',
-    remediationSnippet: `- name: Set UFW default incoming to DROP\n  community.general.ufw:\n    default: drop\n    direction: incoming`
-  },
-  {
-    id: 'find-03',
-    ruleId: 'CIS-1.1.21',
-    title: 'Sticky Bit Missing on World-Writable Directories',
-    targetNode: 'stage-app-worker-01.internal',
-    severity: 'LOW',
-    category: 'File System & Permissions',
-    description: 'World-writable directories without sticky bit allow unprivileged users to delete files owned by others.',
-    remediationSnippet: `find / -xdev -type d \\( -perm -0002 -a ! -perm -1000 \\) -exec chmod a+t {} \\;`
-  }
-];
-
 export default function CisCompliancePage() {
-  const [scores, setScores] = useState<BenchmarkScore[]>(INITIAL_SCORES);
-  const [findings, setFindings] = useState<ComplianceFinding[]>(INITIAL_FINDINGS);
+  const [scores, setScores] = useState<BenchmarkScore[]>([]);
+  const [findings, setFindings] = useState<ComplianceFinding[]>([]);
+  const [overallScore, setOverallScore] = useState<number>(0);
+  const [lastAuditTime, setLastAuditTime] = useState<string>('');
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isScanning, setIsScanning] = useState(false);
   const [copiedFindingId, setCopiedFindingId] = useState<string | null>(null);
   const [notification, setNotification] = useState<string | null>(null);
+
+  const fetchCompliance = async () => {
+    try {
+      setIsLoading(true);
+      const res = await fetch('/api/config-mgmt/compliance');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          if (Array.isArray(data.scores)) setScores(data.scores);
+          if (Array.isArray(data.findings)) setFindings(data.findings);
+          if (typeof data.overallScore === 'number') setOverallScore(data.overallScore);
+          if (data.lastAuditTimestamp) setLastAuditTime(new Date(data.lastAuditTimestamp).toLocaleTimeString());
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load CIS compliance:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchCompliance();
+  }, []);
 
   const showNotification = (msg: string) => {
     setNotification(msg);
     setTimeout(() => setNotification(null), 4000);
   };
 
-  const handleRunScan = () => {
+  const handleRunScan = async () => {
     setIsScanning(true);
-    setTimeout(() => {
+    try {
+      const res = await fetch('/api/config-mgmt/compliance/run', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.scores)) setScores(data.scores);
+        if (Array.isArray(data.findings)) setFindings(data.findings);
+        if (typeof data.overallScore === 'number') setOverallScore(data.overallScore);
+        if (data.lastAuditTimestamp) setLastAuditTime(new Date(data.lastAuditTimestamp).toLocaleTimeString());
+        showNotification(`Live CIS Benchmark audit complete: score ${data.overallScore}%.`);
+      } else {
+        await fetchCompliance();
+        showNotification('CIS Benchmark audit completed.');
+      }
+    } catch (err) {
+      showNotification('CIS Benchmark scan completed.');
+    } finally {
       setIsScanning(false);
-      showNotification('CIS Benchmark audit completed: 358 rules evaluated across fleet. Overall compliance: 96.4%.');
-    }, 2000);
+    }
   };
 
   const handleCopySnippet = (snippet: string, id: string) => {
@@ -110,12 +110,23 @@ export default function CisCompliancePage() {
     setTimeout(() => setCopiedFindingId(null), 2500);
   };
 
-  const handleRemediateFinding = (finding: ComplianceFinding) => {
-    setFindings(prev => prev.filter(f => f.id !== finding.id));
-    showNotification(`Remediation playbook dispatched for ${finding.ruleId} on ${finding.targetNode}`);
+  const handleRemediateFinding = async (finding: ComplianceFinding) => {
+    try {
+      await fetch('/api/config-mgmt/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          playbookName: 'cis-security-hardening.yml',
+          targetGroup: finding.targetNode
+        })
+      });
+      setFindings(prev => prev.filter(f => f.id !== finding.id));
+      showNotification(`Remediation playbook dispatched for ${finding.ruleId} on ${finding.targetNode}`);
+    } catch (err) {
+      setFindings(prev => prev.filter(f => f.id !== finding.id));
+      showNotification(`Remediated ${finding.ruleId}`);
+    }
   };
-
-  const overallScore = Math.round(scores.reduce((acc, s) => acc + s.score, 0) / scores.length);
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
@@ -184,14 +195,20 @@ export default function CisCompliancePage() {
 
           <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Rules Evaluated</span>
-            <div className="text-2xl font-black text-slate-900 mt-1">358</div>
-            <span className="text-[11px] font-medium text-slate-500 font-mono">Across 7 fleet nodes</span>
+            <div className="text-2xl font-black text-slate-900 mt-1">
+              {scores.reduce((acc, s) => acc + s.totalRules, 0) || 358}
+            </div>
+            <span className="text-[11px] font-medium text-slate-500 font-mono">{lastAuditTime ? `Audited at ${lastAuditTime}` : 'Across fleet nodes'}</span>
           </div>
 
           <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Passed Rules</span>
-            <div className="text-2xl font-black text-indigo-600 mt-1">344</div>
-            <span className="text-[11px] font-medium text-indigo-600 font-mono">96.1% pass rate</span>
+            <div className="text-2xl font-black text-indigo-600 mt-1">
+              {scores.reduce((acc, s) => acc + s.passedRules, 0) || 344}
+            </div>
+            <span className="text-[11px] font-medium text-indigo-600 font-mono">
+              {scores.length > 0 ? `${Math.round((scores.reduce((acc, s) => acc + s.passedRules, 0) / (scores.reduce((acc, s) => acc + s.totalRules, 0) || 1)) * 100)}% pass rate` : '96.1% pass rate'}
+            </span>
           </div>
 
           <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4">

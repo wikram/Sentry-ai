@@ -107,7 +107,7 @@ export default function DataSourcesTab({
                   <AlertTriangle size={18} />
                 </div>
                 <div>
-                  <h3 className="font-bold text-red-900">Failed Sentry Jobs Detected</h3>
+                  <h3 className="font-bold text-red-900">Failed Pipeline Jobs Detected</h3>
                   <p className="text-[10px] text-red-500 font-bold uppercase tracking-widest">{failedJenkinsJobs.length} Critical failures</p>
                 </div>
               </div>

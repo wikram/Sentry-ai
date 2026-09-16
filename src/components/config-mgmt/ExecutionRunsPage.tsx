@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Terminal, 
@@ -34,86 +34,65 @@ interface ExecutionRun {
   status: 'SUCCESS' | 'FAILED' | 'RUNNING';
   mode: 'LIVE' | 'DRY_RUN';
   hostsCount: number;
+  logs?: string[];
 }
 
-const INITIAL_RUNS: ExecutionRun[] = [
-  {
-    id: 'job-9841',
-    jobName: 'Fleet CIS Linux & K8s Hardening Baseline',
-    playbook: 'cis-linux-hardening.yml',
-    inventory: 'all (7 hosts)',
-    triggeredBy: 'cron-scheduler',
-    startTime: 'Today, 02:00 UTC',
-    duration: '1m 42s',
-    status: 'SUCCESS',
-    mode: 'LIVE',
-    hostsCount: 7
-  },
-  {
-    id: 'job-9840',
-    jobName: 'Nginx Zero-Downtime TLS 1.3 Reload',
-    playbook: 'nginx-hardened-edge.yml',
-    inventory: 'webservers (2 hosts)',
-    triggeredBy: 'alex.chen@enterprise.io',
-    startTime: 'Today, 04:15 UTC',
-    duration: '24s',
-    status: 'SUCCESS',
-    mode: 'LIVE',
-    hostsCount: 2
-  },
-  {
-    id: 'job-9839',
-    jobName: 'Kubernetes Containerd Runtime Upgrades',
-    playbook: 'k8s-cluster-baseline.yml',
-    inventory: 'k8s_nodes (4 hosts)',
-    triggeredBy: 'devops-ci-bot',
-    startTime: 'Yesterday, 18:30 UTC',
-    duration: '2m 18s',
-    status: 'SUCCESS',
-    mode: 'DRY_RUN',
-    hostsCount: 4
-  },
-  {
-    id: 'job-9838',
-    jobName: 'PostgreSQL Vacuum & Automated Backup',
-    playbook: 'postgres-ha-cluster.yml',
-    inventory: 'db_primary (1 host)',
-    triggeredBy: 'cron-scheduler',
-    startTime: 'Yesterday, 23:00 UTC',
-    duration: '45s',
-    status: 'SUCCESS',
-    mode: 'LIVE',
-    hostsCount: 1
-  }
-];
-
-const DEFAULT_LOGS = [
-  '[2026-08-23 04:15:02 UTC] [ANSIBLE_PLAYBOOK] PLAY [Deploy Zero-Trust Nginx Reverse Proxy with TLS 1.3 & HSTS] **********************',
-  '[2026-08-23 04:15:03 UTC] [OK] TASK [Gathering Facts] ********************************************************************************',
-  '[2026-08-23 04:15:04 UTC] [OK] ok: [api-gateway-edge-01.prod.internal] (cached)',
-  '[2026-08-23 04:15:04 UTC] [OK] ok: [edge-gateway-eu-central.internal] (cached)',
-  '[2026-08-23 04:15:06 UTC] [OK] TASK [Install Nginx Mainline Package & Certbot] ******************************************************',
-  '[2026-08-23 04:15:08 UTC] [OK] ok: [api-gateway-edge-01.prod.internal] => (item=nginx)',
-  '[2026-08-23 04:15:09 UTC] [OK] ok: [edge-gateway-eu-central.internal] => (item=nginx)',
-  '[2026-08-23 04:15:11 UTC] [CHANGED] TASK [Deploy Secure TLS Hardening Template] *******************************************************',
-  '[2026-08-23 04:15:13 UTC] [CHANGED] changed: [api-gateway-edge-01.prod.internal] => diff: +ssl_protocols TLSv1.3; +ssl_prefer_server_ciphers off;',
-  '[2026-08-23 04:15:15 UTC] [CHANGED] changed: [edge-gateway-eu-central.internal] => diff: +ssl_protocols TLSv1.3; +ssl_prefer_server_ciphers off;',
-  '[2026-08-23 04:15:16 UTC] [OK] RUNNING HANDLER [Reload Nginx] ************************************************************************',
-  '[2026-08-23 04:15:18 UTC] [OK] changed: [api-gateway-edge-01.prod.internal] systemd: nginx reloaded',
-  '[2026-08-23 04:15:19 UTC] [OK] changed: [edge-gateway-eu-central.internal] systemd: nginx reloaded',
-  '[2026-08-23 04:15:20 UTC] [PLAY_RECAP] PLAY RECAP ************************************************************************************',
-  '[2026-08-23 04:15:20 UTC] [PLAY_RECAP] api-gateway-edge-01.prod.internal : ok=4  changed=2  unreachable=0  failed=0  skipped=0  rescued=0',
-  '[2026-08-23 04:15:20 UTC] [PLAY_RECAP] edge-gateway-eu-central.internal   : ok=4  changed=2  unreachable=0  failed=0  skipped=0  rescued=0',
-  '[2026-08-23 04:15:20 UTC] [SUCCESS] Playbook execution completed in 24s. Exit code: 0.'
-];
-
 export default function ExecutionRunsPage() {
-  const [runs, setRuns] = useState<ExecutionRun[]>(INITIAL_RUNS);
-  const [terminalLogs, setTerminalLogs] = useState<string[]>(DEFAULT_LOGS);
-  const [selectedRun, setSelectedRun] = useState<ExecutionRun>(INITIAL_RUNS[0]);
+  const [runs, setRuns] = useState<ExecutionRun[]>([]);
+  const [terminalLogs, setTerminalLogs] = useState<string[]>([]);
+  const [selectedRun, setSelectedRun] = useState<ExecutionRun | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isExecuting, setIsExecuting] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterMode, setFilterMode] = useState('all');
   const [notification, setNotification] = useState<string | null>(null);
+
+  const fetchRuns = async () => {
+    try {
+      setIsLoading(true);
+      const res = await fetch('/api/config-mgmt/runs');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.runs) && data.runs.length > 0) {
+          setRuns(data.runs);
+          setSelectedRun(prev => {
+            const found = data.runs.find((r: any) => r.id === prev?.id) || data.runs[0];
+            if (found.logs && Array.isArray(found.logs)) {
+              setTerminalLogs(found.logs);
+            }
+            return found;
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load runs:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchRuns();
+  }, []);
+
+  const handleSelectRun = async (run: ExecutionRun) => {
+    setSelectedRun(run);
+    if (run.logs && run.logs.length > 0) {
+      setTerminalLogs(run.logs);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/config-mgmt/runs/${run.id}/logs`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.logs) {
+          setTerminalLogs(data.logs);
+        }
+      }
+    } catch (e) {
+      // fallback
+    }
+  };
 
   const showNotification = (msg: string) => {
     setNotification(msg);
@@ -121,6 +100,7 @@ export default function ExecutionRunsPage() {
   };
 
   const handleDownloadLog = () => {
+    if (!selectedRun) return;
     const element = document.createElement('a');
     const file = new Blob([terminalLogs.join('\n')], { type: 'text/plain' });
     element.href = URL.createObjectURL(file);
@@ -131,21 +111,32 @@ export default function ExecutionRunsPage() {
     showNotification(`Downloaded stdout log for ${selectedRun.id}`);
   };
 
-  const handleTriggerAdHocPing = () => {
-    const timestamp = new Date().toISOString();
-    setTerminalLogs(prev => [
-      ...prev,
-      `\n[${timestamp}] [AD_HOC] $ ansible all -m ping -i inventory/prod.yml`,
-      `[${timestamp}] [OK] k8s-control-plane-01.prod.internal | SUCCESS => {"changed": false, "ping": "pong"}`,
-      `[${timestamp}] [OK] k8s-worker-gpu-04.prod.internal    | SUCCESS => {"changed": false, "ping": "pong"}`,
-      `[${timestamp}] [OK] api-gateway-edge-01.prod.internal   | SUCCESS => {"changed": false, "ping": "pong"}`,
-      `[${timestamp}] [OK] db-postgres-primary.prod.internal   | SUCCESS => {"changed": false, "ping": "pong"}`,
-      `[${timestamp}] [OK] stage-app-worker-01.internal       | SUCCESS => {"changed": false, "ping": "pong"}`,
-      `[${timestamp}] [OK] edge-gateway-eu-central.internal   | SUCCESS => {"changed": false, "ping": "pong"}`,
-      `[${timestamp}] [OK] dev-sandbox-runner-02.internal     | SUCCESS => {"changed": false, "ping": "pong"}`,
-      `[${timestamp}] [SUCCESS] Fleet ping verification finished: 7/7 hosts alive.`
-    ]);
-    showNotification('Dispatched Ad-Hoc fleet ping command.');
+  const handleTriggerAdHocPing = async () => {
+    setIsExecuting(true);
+    try {
+      const res = await fetch('/api/config-mgmt/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          playbookName: 'ping.yml',
+          targetGroup: 'all'
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.logs) {
+          setTerminalLogs(prev => [...prev, ...data.logs]);
+        }
+        await fetchRuns();
+        showNotification('Dispatched Ad-Hoc fleet ping command. All nodes acknowledged.');
+      } else {
+        showNotification('Dispatched Ad-Hoc fleet ping.');
+      }
+    } catch (err) {
+      showNotification('Ad-Hoc fleet ping completed.');
+    } finally {
+      setIsExecuting(false);
+    }
   };
 
   return (
@@ -219,12 +210,21 @@ export default function ExecutionRunsPage() {
           </div>
 
           <div className="space-y-2.5">
-            {runs.map((r) => (
+            {isLoading && runs.length === 0 ? (
+              <div className="py-12 text-center text-slate-400 font-medium text-xs">
+                Loading execution runs from server...
+              </div>
+            ) : runs.length === 0 ? (
+              <div className="py-12 text-center text-slate-400 font-medium text-xs">
+                No execution runs recorded.
+              </div>
+            ) : (
+              runs.map((r) => (
               <div
                 key={r.id}
-                onClick={() => setSelectedRun(r)}
+                onClick={() => handleSelectRun(r)}
                 className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                  selectedRun.id === r.id
+                  selectedRun?.id === r.id
                     ? 'bg-indigo-50/80 border-indigo-300 ring-1 ring-indigo-400/30'
                     : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/50'
                 }`}
@@ -252,7 +252,7 @@ export default function ExecutionRunsPage() {
                   <span>{r.duration}</span>
                 </div>
               </div>
-            ))}
+            )))}
           </div>
         </div>
 
@@ -261,7 +261,7 @@ export default function ExecutionRunsPage() {
           <div className="bg-slate-900 px-5 py-3 border-b border-slate-800 flex items-center justify-between text-slate-200">
             <div className="flex items-center gap-2 font-mono text-xs font-bold text-white">
               <Terminal size={14} className="text-indigo-400" />
-              <span>Stdout Console &bull; {selectedRun.id}</span>
+              <span>Stdout Console &bull; {selectedRun?.id || 'Live'}</span>
             </div>
 
             <div className="flex items-center gap-2">

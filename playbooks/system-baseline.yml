@@ -1,0 +1,33 @@
+---
+- name: Hardened Linux Host & Container Baseline
+  hosts: localhost
+  become: false
+  vars:
+    target_environment: "production"
+    sysctl_swappiness: 0
+    max_open_files: 65536
+    keepalive_timeout: 65
+
+  tasks:
+    - name: Verify Kernel & Container Host Specifications
+      ansible.builtin.debug:
+        msg: "Auditing host runtime: {{ ansible_distribution | default('Linux Container') }} (Kernel {{ ansible_kernel | default('6.6') }})"
+
+    - name: Enforce Host Memory Swappiness Threshold
+      ansible.posix.sysctl:
+        name: vm.swappiness
+        value: "0"
+        state: present
+        reload: true
+
+    - name: Audit File Descriptor Limits (/etc/security/limits.conf)
+      ansible.builtin.lineinfile:
+        path: /etc/security/limits.d/99-nofile.conf
+        line: "* soft nofile 65536"
+        create: true
+        mode: "0644"
+
+    - name: Ensure Ingress Reverse Proxy Status
+      ansible.builtin.command: ss -tulpn
+      register: socket_report
+      changed_when: false

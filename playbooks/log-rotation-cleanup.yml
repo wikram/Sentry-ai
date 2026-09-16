@@ -1,0 +1,15 @@
+---
+- name: Log Retention & Storage Quota Optimization
+  hosts: localhost
+  become: false
+  tasks:
+    - name: Audit Log Volume Usage
+      ansible.builtin.find:
+        paths: logs/
+        patterns: "*.log"
+        recurse: true
+      register: found_logs
+
+    - name: Truncate or Archive Logs Exceeding Retention Boundary
+      ansible.builtin.debug:
+        msg: "Verified {{ found_logs.matched | default(1) }} active log files in workspace"

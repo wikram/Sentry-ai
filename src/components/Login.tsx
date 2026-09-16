@@ -98,8 +98,8 @@ export default function Login({ onLogin }: LoginProps) {
             <ShieldAlert size={20} className="text-blue-500" />
           </div>
           <div>
-            <span className="text-sm font-black tracking-widest text-white">DEVOPS CENTRAL</span>
-            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">System Governance</p>
+            <span className="text-sm font-black tracking-widest text-white">DEVOPS STUDIO</span>
+            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">Autonomous Operations</p>
           </div>
         </div>
 
@@ -148,8 +148,8 @@ export default function Login({ onLogin }: LoginProps) {
             <div className="w-16 h-16 bg-slate-900 rounded-2xl flex items-center justify-center mb-6 shadow-xl border border-white/10">
               <ShieldAlert size={32} className="text-blue-500" />
             </div>
-            <h1 className="text-3xl font-black tracking-tighter text-slate-900 mb-2">DevOps Central</h1>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Autonomous System Governance</p>
+            <h1 className="text-3xl font-black tracking-tighter text-slate-900 mb-2">Devops Studio</h1>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Autonomous Operations & Governance</p>
           </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">

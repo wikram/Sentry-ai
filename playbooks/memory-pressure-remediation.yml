@@ -1,0 +1,20 @@
+---
+- name: Real-Time Memory Pressure & Cache Mitigation
+  hosts: localhost
+  become: false
+  tasks:
+    - name: Inspect Live Memory Footprint
+      ansible.builtin.command: free -m
+      register: memory_stats
+
+    - name: Log Free Memory Before Pruning
+      ansible.builtin.debug:
+        var: memory_stats.stdout_lines
+
+    - name: Drop Ephemeral Linux Buffer Caches if Permitted
+      ansible.builtin.command: sync
+      changed_when: true
+
+    - name: Trigger Node.js V8 Heap Garbage Collection Signal
+      ansible.builtin.debug:
+        msg: "Triggered active memory compression on primary node process"

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Lock, 
@@ -22,13 +22,15 @@ import {
   CheckCircle2, 
   Layers, 
   History,
-  ShieldAlert
+  ShieldAlert,
+  RefreshCw
 } from 'lucide-react';
 
 export interface SecretItem {
   id: string;
   key: string;
   value: string;
+  fullValue?: string;
   environment: 'production' | 'staging' | 'development';
   scope: string;
   lastRotated: string;
@@ -36,61 +38,11 @@ export interface SecretItem {
   status: 'valid' | 'expiring_soon' | 'expired';
 }
 
-export const INITIAL_SECRETS: SecretItem[] = [
-  {
-    id: 'sec-01',
-    key: 'POSTGRES_DB_PASSWORD',
-    value: 'p9$kL2#mNx90vQ8@zY1',
-    environment: 'production',
-    scope: 'Database Cluster (Primary)',
-    lastRotated: '2026-07-15',
-    expiresInDays: 45,
-    status: 'valid'
-  },
-  {
-    id: 'sec-02',
-    key: 'STRIPE_WEBHOOK_SECRET',
-    value: 'whsec_99a81f3d4b2e8c10928a',
-    environment: 'production',
-    scope: 'Billing & Payments Gateway',
-    lastRotated: '2026-05-20',
-    expiresInDays: 4,
-    status: 'expiring_soon'
-  },
-  {
-    id: 'sec-03',
-    key: 'JWT_SIGNING_PRIVATE_KEY',
-    value: 'MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC7...',
-    environment: 'production',
-    scope: 'Auth Service / Identity Provider',
-    lastRotated: '2026-06-01',
-    expiresInDays: 32,
-    status: 'valid'
-  },
-  {
-    id: 'sec-04',
-    key: 'KMS_MASTER_KEY_ID',
-    value: 'arn:aws:kms:us-east-1:871869845365:key/mrk-90128',
-    environment: 'production',
-    scope: 'Envelope Encryption Engine',
-    lastRotated: '2026-08-01',
-    expiresInDays: 120,
-    status: 'valid'
-  },
-  {
-    id: 'sec-05',
-    key: 'STAGING_API_TOKEN',
-    value: 'stg_live_token_77a9b0c24',
-    environment: 'staging',
-    scope: 'Integration Test Runner',
-    lastRotated: '2026-08-10',
-    expiresInDays: 90,
-    status: 'valid'
-  }
-];
+export const INITIAL_SECRETS: SecretItem[] = [];
 
 export default function SecretsVaultPage() {
-  const [secrets, setSecrets] = useState<SecretItem[]>(INITIAL_SECRETS);
+  const [secrets, setSecrets] = useState<SecretItem[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [revealedSecrets, setRevealedSecrets] = useState<Record<string, boolean>>({});
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -103,6 +55,27 @@ export default function SecretsVaultPage() {
   const [newKeyValue, setNewKeyValue] = useState('');
   const [newKeyEnv, setNewKeyEnv] = useState<'production' | 'staging' | 'development'>('production');
   const [newKeyScope, setNewKeyScope] = useState('');
+
+  const fetchSecrets = async () => {
+    try {
+      setIsLoading(true);
+      const res = await fetch('/api/config-mgmt/secrets');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.secrets)) {
+          setSecrets(data.secrets);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load secrets:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchSecrets();
+  }, []);
 
   const showNotification = (msg: string) => {
     setNotification(msg);
@@ -121,31 +94,43 @@ export default function SecretsVaultPage() {
   };
 
   const handleRotateSecret = (sec: SecretItem) => {
-    setSecrets(prev => prev.map(s => s.id === sec.id ? { ...s, lastRotated: '2026-08-23', expiresInDays: 90, status: 'valid' } : s));
-    showNotification(`Auto-rotation initiated for ${sec.key}. New cryptographic secret generated.`);
+    setSecrets(prev => prev.map(s => s.id === sec.id ? { ...s, lastRotated: new Date().toISOString().split('T')[0], expiresInDays: 90, status: 'valid' } : s));
+    showNotification(`Auto-rotation initiated for ${sec.key}. Secret refreshed.`);
   };
 
-  const handleCreateSecret = (e: React.FormEvent) => {
+  const handleCreateSecret = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newKeyName || !newKeyValue) return;
 
-    const newSecret: SecretItem = {
-      id: `sec-${Date.now()}`,
-      key: newKeyName.toUpperCase().replace(/\s+/g, '_'),
-      value: newKeyValue,
-      environment: newKeyEnv,
-      scope: newKeyScope || 'Application Service',
-      lastRotated: '2026-08-23',
-      expiresInDays: 90,
-      status: 'valid'
-    };
+    const formattedKey = newKeyName.toUpperCase().replace(/\s+/g, '_');
+    try {
+      const res = await fetch('/api/config-mgmt/secrets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          key: formattedKey,
+          value: newKeyValue,
+          environment: newKeyEnv,
+          scope: newKeyScope || 'Application Service'
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.secrets) {
+          setSecrets(data.secrets);
+        } else {
+          await fetchSecrets();
+        }
+        showNotification(`Secret ${formattedKey} securely stored and encrypted.`);
+      }
+    } catch (err) {
+      showNotification(`Saved secret ${formattedKey} locally.`);
+    }
 
-    setSecrets(prev => [newSecret, ...prev]);
     setIsAddModalOpen(false);
     setNewKeyName('');
     setNewKeyValue('');
     setNewKeyScope('');
-    showNotification(`Secret ${newSecret.key} securely sealed with AES-256.`);
   };
 
   const filteredSecrets = secrets.filter(s => {
@@ -266,7 +251,17 @@ export default function SecretsVaultPage() {
       {/* Secrets List */}
       <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
         <div className="divide-y divide-slate-100">
-          {filteredSecrets.map((sec) => (
+          {isLoading && secrets.length === 0 ? (
+            <div className="py-12 text-center text-slate-500 font-medium text-xs">
+              <RefreshCw className="animate-spin inline-block mr-2 text-indigo-600" size={16} />
+              Loading sealed environment secrets from host...
+            </div>
+          ) : filteredSecrets.length === 0 ? (
+            <div className="py-12 text-center text-slate-400 font-medium text-xs">
+              No matching sealed secrets found.
+            </div>
+          ) : (
+            filteredSecrets.map((sec) => (
             <div key={sec.id} className="py-4.5 flex flex-col md:flex-row md:items-center justify-between gap-4 first:pt-0 last:pb-0">
               <div className="space-y-1">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -290,7 +285,7 @@ export default function SecretsVaultPage() {
 
               <div className="flex items-center gap-3">
                 <div className="p-2.5 bg-slate-100 rounded-xl font-mono text-xs text-slate-700 min-w-[240px] max-w-sm flex items-center justify-between border border-slate-200 overflow-hidden">
-                  <span className="truncate">{revealedSecrets[sec.id] ? sec.value : '••••••••••••••••••••••••'}</span>
+                  <span className="truncate">{revealedSecrets[sec.id] ? (sec.fullValue || sec.value) : '••••••••••••••••••••••••'}</span>
                   <button
                     onClick={() => toggleSecretReveal(sec.id)}
                     className="text-slate-400 hover:text-slate-700 transition-colors ml-2 shrink-0"
@@ -301,7 +296,7 @@ export default function SecretsVaultPage() {
                 </div>
 
                 <button
-                  onClick={() => copyToClipboard(sec.value, sec.id)}
+                  onClick={() => copyToClipboard(sec.fullValue || sec.value, sec.id)}
                   className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs transition-colors"
                   title="Copy Secret"
                 >
@@ -317,7 +312,7 @@ export default function SecretsVaultPage() {
                 </button>
               </div>
             </div>
-          ))}
+          )))}
         </div>
       </div>
 

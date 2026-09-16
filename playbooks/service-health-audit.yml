@@ -1,0 +1,19 @@
+---
+- name: Live Service & Port Security Gate Audit
+  hosts: localhost
+  become: false
+  tasks:
+    - name: Check Sentry Reverse Proxy Port 3000 Ingress
+      ansible.builtin.wait_for:
+        port: 3000
+        timeout: 5
+
+    - name: Audit Active Process Table
+      ansible.builtin.command: ps aux
+      register: proc_list
+      changed_when: false
+
+    - name: Verify API Health Endpoint Response
+      ansible.builtin.uri:
+        url: http://localhost:3000/api/health
+        status_code: 200

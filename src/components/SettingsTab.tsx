@@ -6,6 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { formatDateOnly, formatDateTime } from '../lib/dateUtils';
+import AnsibleConfigSection from './settings/AnsibleConfigSection';
 import { 
   RefreshCw, 
   Terminal, 
@@ -46,6 +47,7 @@ interface SettingsTabProps {
   autoRefreshLogs: boolean;
   setAutoRefreshLogs: (v: boolean) => void;
   fetchLogs: () => void;
+  showNotification?: (msg: string) => void;
 }
 
 export interface ManagedUser {
@@ -81,7 +83,7 @@ export interface CustomRole {
 const INITIAL_ROLES: CustomRole[] = [
   {
     id: 'role-admin',
-    name: 'Sentry Admin',
+    name: 'Devops Studio Admin',
     description: 'Full system configuration, security role management, and root privileges.',
     isSystem: true,
     color: 'purple',
@@ -149,9 +151,9 @@ const INITIAL_USERS: ManagedUser[] = [
   {
     id: 'usr-1',
     username: 'admin',
-    email: 'admin@sentry.local',
+    email: 'admin@devopsstudio.local',
     fullName: 'System Administrator',
-    role: 'Sentry Admin',
+    role: 'Devops Studio Admin',
     status: 'Active',
     lastActive: 'Just now',
     createdAt: '2026-01-10'
@@ -197,9 +199,20 @@ export default function SettingsTab({
   autoRefreshLogs,
   setAutoRefreshLogs,
   fetchLogs,
+  showNotification,
 }: SettingsTabProps) {
-  // Navigation State: null (Main Overview Hub) | 'settings-monitoring' | 'user-management'
-  const [activeSubTab, setActiveSubTab] = useState<'settings-monitoring' | 'user-management' | null>(null);
+  // Navigation State: null (Main Overview Hub) | 'settings-monitoring' | 'user-management' | 'ansible-config'
+  const [activeSubTab, setActiveSubTab] = useState<'settings-monitoring' | 'user-management' | 'ansible-config' | null>(null);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+
+  const notify = (msg: string) => {
+    if (showNotification) {
+      showNotification(msg);
+    } else {
+      setToastMsg(msg);
+      setTimeout(() => setToastMsg(null), 3500);
+    }
+  };
 
   // User Management State
   const [users, setUsers] = useState<ManagedUser[]>(() => {
@@ -503,12 +516,12 @@ export default function SettingsTab({
             <div>
               <div className="flex items-center gap-2">
                 <span className="px-2.5 py-1 bg-slate-900 text-white font-mono text-[10px] font-bold rounded-lg tracking-widest uppercase">
-                  Sentry Configuration
+                  Devops Studio Configuration
                 </span>
                 <span className="text-xs text-slate-400 font-medium">v0.0.1</span>
               </div>
-              <h2 className="text-2xl font-black text-slate-900 tracking-tight mt-1">Manage Sentry</h2>
-              <p className="text-xs text-slate-500 mt-0.5">Configure system settings, monitor live logs, and manage user security permissions.</p>
+              <h2 className="text-2xl font-black text-slate-900 tracking-tight mt-1">Manage Devops Studio</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Configure system settings, monitor live logs, manage users, and orchestrate Ansible automation.</p>
             </div>
 
             <div className="flex items-center gap-2">
@@ -519,8 +532,8 @@ export default function SettingsTab({
             </div>
           </div>
 
-          {/* Sentry 2-Menu Section Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Devops Studio 3-Menu Section Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <button
               type="button"
               onClick={() => setActiveSubTab('settings-monitoring')}
@@ -549,7 +562,7 @@ export default function SettingsTab({
             <button
               type="button"
               onClick={() => setActiveSubTab('user-management')}
-              className="p-6 rounded-2xl border border-slate-200 bg-slate-50/50 hover:bg-blue-50/60 hover:border-blue-400 hover:shadow-md transition-all text-left flex items-start gap-4 group"
+              className="p-6 rounded-2xl border border-slate-200 bg-slate-50/50 hover:bg-indigo-50/60 hover:border-indigo-400 hover:shadow-md transition-all text-left flex items-start gap-4 group"
             >
               <div className="p-3.5 rounded-2xl bg-indigo-600 text-white shadow-md shadow-indigo-500/20 group-hover:scale-105 transition-transform shrink-0">
                 <Users size={26} />
@@ -562,10 +575,35 @@ export default function SettingsTab({
                   <ChevronRight size={18} className="text-slate-400 group-hover:text-indigo-600 group-hover:translate-x-0.5 transition-all" />
                 </div>
                 <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
-                  Manage Sentry user credentials, roles, security permissions matrix, and password resets.
+                  Manage Devops Studio user credentials, roles, security permissions matrix, and password resets.
                 </p>
                 <div className="mt-4 inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 group-hover:underline">
                   <span>Open User Management</span>
+                  <ArrowRight size={14} />
+                </div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('ansible-config')}
+              className="p-6 rounded-2xl border border-slate-200 bg-slate-50/50 hover:bg-red-50/60 hover:border-red-400 hover:shadow-md transition-all text-left flex items-start gap-4 group"
+            >
+              <div className="p-3.5 rounded-2xl bg-red-600 text-white shadow-md shadow-red-500/20 group-hover:scale-105 transition-transform shrink-0 font-black text-xl flex items-center justify-center">
+                A
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-black text-base text-slate-900 group-hover:text-red-900">
+                    Ansible Configuration
+                  </h3>
+                  <ChevronRight size={18} className="text-slate-400 group-hover:text-red-600 group-hover:translate-x-0.5 transition-all" />
+                </div>
+                <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                  Configure Ansible location, inventory file, SSH credentials, concurrency forks, and run diagnostics.
+                </p>
+                <div className="mt-4 inline-flex items-center gap-1.5 text-xs font-bold text-red-600 group-hover:underline">
+                  <span>Configure Ansible</span>
                   <ArrowRight size={14} />
                 </div>
               </div>
@@ -586,7 +624,7 @@ export default function SettingsTab({
                 className="flex items-center gap-2 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors shrink-0"
               >
                 <ArrowLeft size={16} />
-                <span>Back to Manage Sentry</span>
+                <span>Back to Manage Devops Studio</span>
               </button>
               <div className="h-4 w-px bg-slate-200 hidden sm:block" />
               <div className="flex items-center gap-2">
@@ -761,7 +799,7 @@ export default function SettingsTab({
                 className="flex items-center gap-2 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors shrink-0"
               >
                 <ArrowLeft size={16} />
-                <span>Back to Manage Sentry</span>
+                <span>Back to Manage Devops Studio</span>
               </button>
               <div className="h-4 w-px bg-slate-200 hidden sm:block" />
               <div className="flex items-center gap-2">
@@ -825,7 +863,7 @@ export default function SettingsTab({
               <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm space-y-4">
                 <div className="flex flex-col md:flex-row items-center justify-between gap-4">
                   <div>
-                    <h3 className="text-base font-bold text-slate-900">Sentry Users & Access Accounts</h3>
+                    <h3 className="text-base font-bold text-slate-900">Devops Studio Users & Access Accounts</h3>
                     <p className="text-xs text-slate-500">Manage operator credentials, role assignments, and password updates.</p>
                   </div>
                 </div>
@@ -895,7 +933,7 @@ export default function SettingsTab({
                                   <div>
                                     <div className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
                                       <span>{u.fullName}</span>
-                                      {u.role === 'Sentry Admin' && (
+                                      {(u.role === 'Devops Studio Admin' || u.role === 'Sentry Admin') && (
                                         <span title="Admin Access"><Shield size={12} className="text-blue-600" /></span>
                                       )}
                                     </div>
@@ -1119,7 +1157,7 @@ export default function SettingsTab({
                 </div>
                 <div>
                   <h2 className="text-base font-bold text-slate-800">
-                    {editingUserId ? 'Edit User Credentials' : 'Create New Sentry User'}
+                    {editingUserId ? 'Edit User Credentials' : 'Create New Devops Studio User'}
                   </h2>
                   <p className="text-xs text-slate-400">Configure username, email, and security role</p>
                 </div>
@@ -1360,135 +1398,6 @@ export default function SettingsTab({
         </div>
       )}
 
-      {/* MODAL 1: ADD / EDIT USER */}
-      {isAddUserOpen && (
-        <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 space-y-5 animate-in zoom-in-95 duration-200 my-auto">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-blue-50 rounded-xl text-blue-600">
-                  <UserPlus size={20} />
-                </div>
-                <div>
-                  <h2 className="text-base font-bold text-slate-800">
-                    {editingUserId ? 'Edit User Credentials' : 'Create New Sentry User'}
-                  </h2>
-                  <p className="text-xs text-slate-400">Configure username, email, and security role</p>
-                </div>
-              </div>
-              <button 
-                onClick={() => setIsAddUserOpen(false)}
-                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            {formError && (
-              <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs font-medium flex items-center gap-2">
-                <AlertCircle size={16} className="shrink-0" />
-                <span>{formError}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleSaveUser} className="space-y-4">
-              <div>
-                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 block mb-1">Username *</label>
-                <input 
-                  type="text" 
-                  value={formUsername}
-                  onChange={(e) => setFormUsername(e.target.value)}
-                  placeholder="e.g. john.doe"
-                  disabled={editingUserId !== null && formUsername === 'admin'}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 disabled:opacity-60"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 block mb-1">Email Address *</label>
-                <input 
-                  type="email" 
-                  value={formEmail}
-                  onChange={(e) => setFormEmail(e.target.value)}
-                  placeholder="e.g. john.doe@company.com"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 block mb-1">Full Name</label>
-                <input 
-                  type="text" 
-                  value={formFullName}
-                  onChange={(e) => setFormFullName(e.target.value)}
-                  placeholder="e.g. John Doe"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 block mb-1">Role & Permissions</label>
-                <select
-                  value={formRole}
-                  onChange={(e) => setFormRole(e.target.value as ManagedUser['role'])}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                >
-                  <option value="Sentry Admin">Sentry Admin (Full System Access)</option>
-                  <option value="SRE Engineer">SRE Engineer (RCA & Diagnostic Logs)</option>
-                  <option value="DevOps Developer">DevOps Developer (Trigger & View Builds)</option>
-                  <option value="Read Only">Read Only (Auditor View)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 block mb-1">Account Status</label>
-                <div className="flex gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700">
-                    <input 
-                      type="radio" 
-                      name="status"
-                      checked={formStatus === 'Active'}
-                      onChange={() => setFormStatus('Active')}
-                      className="text-blue-600 focus:ring-blue-500"
-                    />
-                    <span>Active</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700">
-                    <input 
-                      type="radio" 
-                      name="status"
-                      checked={formStatus === 'Inactive'}
-                      onChange={() => setFormStatus('Inactive')}
-                      className="text-blue-600 focus:ring-blue-500"
-                    />
-                    <span>Inactive (Disabled)</span>
-                  </label>
-                </div>
-              </div>
-
-              <div className="flex gap-3 pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsAddUserOpen(false)}
-                  className="flex-1 py-2.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 transition-all flex items-center justify-center gap-2"
-                >
-                  <Check size={14} />
-                  <span>{editingUserId ? 'Save Changes' : 'Create User'}</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       {/* MODAL 2: RESET PASSWORD */}
       {resetPassUserId && (
         <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
@@ -1553,6 +1462,29 @@ export default function SettingsTab({
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* 4. DEDICATED PAGE VIEW: ANSIBLE CONFIGURATION */}
+      {activeSubTab === 'ansible-config' && (
+        <AnsibleConfigSection
+          onBack={() => setActiveSubTab(null)}
+          showNotification={notify}
+        />
+      )}
+
+      {/* Floating Toast Notification */}
+      {toastMsg && (
+        <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white px-4 py-3 rounded-2xl shadow-2xl border border-slate-700 flex items-center gap-3 text-xs font-semibold animate-in fade-in slide-in-from-bottom-3 duration-200">
+          <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+          <span>{toastMsg}</span>
+          <button 
+            type="button" 
+            onClick={() => setToastMsg(null)}
+            className="text-slate-400 hover:text-white ml-2"
+          >
+            <X size={14} />
+          </button>
         </div>
       )}
     </motion.div>

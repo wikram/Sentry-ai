@@ -1,6 +1,6 @@
 {
-  "name": "DevSecOps Incident Analyzer",
-  "description": "Comprehensive DevOps solution featuring DevSecOps Incident Analyzer, Configuration Management, and Infrastructure as Code suites.",
+  "name": "Devops Studio",
+  "description": "Comprehensive DevOps solution featuring Devops Studio Incident Analyzer, Configuration Management, Ansible Orchestration, and Infrastructure as Code suites.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
