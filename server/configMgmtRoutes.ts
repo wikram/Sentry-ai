@@ -12,7 +12,10 @@ import {
   saveAnsibleConfig,
   testAnsibleSetup,
   getInventoryRawContent,
-  saveInventoryRawContent
+  saveInventoryRawContent,
+  inspectAnsibleDirectories,
+  scaffoldAnsibleDirectories,
+  getAnsibleCfgContent
 } from './configMgmtService';
 
 export function createConfigMgmtRouter(): express.Router {
@@ -240,6 +243,37 @@ export function createConfigMgmtRouter(): express.Router {
       res.json(result);
     } catch (err: any) {
       console.error('Error in POST /api/config-mgmt/inventory-file:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  router.get('/ansible-directories', (req, res) => {
+    try {
+      const inspection = inspectAnsibleDirectories();
+      res.json({ success: true, ...inspection });
+    } catch (err: any) {
+      console.error('Error in GET /api/config-mgmt/ansible-directories:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  router.post('/ansible-directories/scaffold', (req, res) => {
+    try {
+      const result = scaffoldAnsibleDirectories(req.body);
+      const inspection = inspectAnsibleDirectories();
+      res.json({ success: result.success, ...result, inspection });
+    } catch (err: any) {
+      console.error('Error in POST /api/config-mgmt/ansible-directories/scaffold:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  router.get('/ansible-cfg', (req, res) => {
+    try {
+      const data = getAnsibleCfgContent();
+      res.json({ success: true, ...data });
+    } catch (err: any) {
+      console.error('Error in GET /api/config-mgmt/ansible-cfg:', err);
       res.status(500).json({ success: false, error: err.message });
     }
   });
