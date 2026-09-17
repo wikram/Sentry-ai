@@ -15,7 +15,11 @@ import {
   saveInventoryRawContent,
   inspectAnsibleDirectories,
   scaffoldAnsibleDirectories,
-  getAnsibleCfgContent
+  getAnsibleCfgContent,
+  getAnsibleGitSyncStatus,
+  saveAnsibleGitSyncConfig,
+  testGitHubConnection,
+  syncAnsibleFromGitHub
 } from './configMgmtService';
 
 export function createConfigMgmtRouter(): express.Router {
@@ -275,6 +279,51 @@ export function createConfigMgmtRouter(): express.Router {
     } catch (err: any) {
       console.error('Error in GET /api/config-mgmt/ansible-cfg:', err);
       res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 8. GitHub Integration & Auto-Sync (30 min interval)
+  router.get('/ansible-git-sync', (req, res) => {
+    try {
+      const status = getAnsibleGitSyncStatus();
+      res.json({ success: true, ...status });
+    } catch (err: any) {
+      console.error('Error in GET /api/config-mgmt/ansible-git-sync:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  router.post('/ansible-git-sync', (req, res) => {
+    try {
+      const updated = saveAnsibleGitSyncConfig(req.body);
+      const status = getAnsibleGitSyncStatus();
+      res.json({ success: true, message: 'GitHub configuration updated successfully', ...status });
+    } catch (err: any) {
+      console.error('Error in POST /api/config-mgmt/ansible-git-sync:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  router.post('/ansible-git-sync/test', async (req, res) => {
+    try {
+      const { repoUrl, branch, token } = req.body;
+      const result = await testGitHubConnection(repoUrl, branch, token);
+      res.json(result);
+    } catch (err: any) {
+      console.error('Error in POST /api/config-mgmt/ansible-git-sync/test:', err);
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  router.post('/ansible-git-sync/pull', async (req, res) => {
+    try {
+      const force = Boolean(req.body?.force);
+      const result = await syncAnsibleFromGitHub(force);
+      const status = getAnsibleGitSyncStatus();
+      res.json({ ...result, ...status });
+    } catch (err: any) {
+      console.error('Error in POST /api/config-mgmt/ansible-git-sync/pull:', err);
+      res.status(500).json({ success: false, message: err.message });
     }
   });
 

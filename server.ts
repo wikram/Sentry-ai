@@ -7,6 +7,7 @@ import yaml from 'js-yaml';
 import multer from 'multer';
 import dotenv from 'dotenv';
 import { createConfigMgmtRouter } from './server/configMgmtRoutes';
+import { startAnsibleGitSyncScheduler } from './server/configMgmtService';
 
 dotenv.config();
 
@@ -2061,6 +2062,8 @@ const initialAnalysisHistory: any[] = [
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    // Start automated 30-minute Ansible GitHub sync scheduler
+    startAnsibleGitSyncScheduler();
   });
 }
 

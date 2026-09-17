@@ -35,9 +35,56 @@ import {
   ExternalLink,
   ChevronRight,
   Eye,
-  CheckCircle
+  CheckCircle,
+  GitBranch,
+  GitPullRequest,
+  GitCommit,
+  Clock,
+  Lock,
+  Globe,
+  AlertCircle,
+  History
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+
+export interface AnsibleGitSyncData {
+  enabled: boolean;
+  repoUrl: string;
+  branch: string;
+  targetDirectory: string;
+  syncIntervalMinutes: number;
+  authType: 'none' | 'token';
+  token?: string;
+  hasToken?: boolean;
+  autoPullChanges: boolean;
+  syncInventory: boolean;
+  syncPlaybooks: boolean;
+  syncRoles: boolean;
+  syncAnsibleCfg: boolean;
+  lastStatus: 'idle' | 'checking' | 'synced' | 'changes_pulled' | 'error';
+  lastStatusMessage?: string;
+  lastCheckedAt?: string;
+  lastPulledAt?: string;
+  lastCommitHash?: string;
+  lastCommitMessage?: string;
+  lastCommitAuthor?: string;
+  lastCommitDate?: string;
+  changedFilesCount?: number;
+  lastChangedFiles?: string[];
+  nextScheduledCheck?: string;
+}
+
+export interface AnsibleGitSyncLog {
+  id: string;
+  timestamp: string;
+  type: 'CHECK' | 'PULL' | 'CLONE' | 'ERROR';
+  status: 'SUCCESS' | 'NO_CHANGES' | 'CHANGED' | 'ERROR';
+  commitHash?: string;
+  commitMessage?: string;
+  changedFiles?: string[];
+  message: string;
+  durationMs?: number;
+}
 
 export interface AnsibleConfigData {
   ansibleDirectory: string;
@@ -181,11 +228,40 @@ export default function AnsibleConfigSection({ onBack, showNotification }: Ansib
   const [inventoryStats, setInventoryStats] = useState<{ hostsCount: number; groups: string[] }>({ hostsCount: 0, groups: [] });
   const [isSavingInventory, setIsSavingInventory] = useState<boolean>(false);
 
-  // Load configuration and directory inspection on mount
+  // GitHub Integration & Auto-Sync (30 Min) State
+  const [gitSync, setGitSync] = useState<AnsibleGitSyncData>({
+    enabled: true,
+    repoUrl: '',
+    branch: 'main',
+    targetDirectory: 'ansible-repo',
+    syncIntervalMinutes: 30,
+    authType: 'none',
+    token: '',
+    autoPullChanges: true,
+    syncInventory: true,
+    syncPlaybooks: true,
+    syncRoles: true,
+    syncAnsibleCfg: false,
+    lastStatus: 'idle',
+    lastStatusMessage: 'Scheduled to check every 30 minutes',
+    changedFilesCount: 0,
+    lastChangedFiles: []
+  });
+  const [gitSyncLogs, setGitSyncLogs] = useState<AnsibleGitSyncLog[]>([]);
+  const [isLoadingGitSync, setIsLoadingGitSync] = useState<boolean>(false);
+  const [isSavingGit, setIsSavingGit] = useState<boolean>(false);
+  const [isTestingGit, setIsTestingGit] = useState<boolean>(false);
+  const [isPullingGit, setIsPullingGit] = useState<boolean>(false);
+  const [gitTestResult, setGitTestResult] = useState<{ success: boolean; message: string; remoteHead?: string } | null>(null);
+  const [showGitLogs, setShowGitLogs] = useState<boolean>(false);
+  const [isGitEditing, setIsGitEditing] = useState<boolean>(false);
+
+  // Load configuration, inventory, directory inspection & git sync on mount
   useEffect(() => {
     fetchConfig();
     fetchInventory();
     fetchDirectoryInspection();
+    fetchGitSync();
   }, []);
 
   const fetchConfig = async () => {
@@ -238,6 +314,110 @@ export default function AnsibleConfigSection({ onBack, showNotification }: Ansib
       }
     } catch (err) {
       console.error('Failed to load inventory:', err);
+    }
+  };
+
+  const fetchGitSync = async () => {
+    try {
+      setIsLoadingGitSync(true);
+      const res = await fetch('/api/config-mgmt/ansible-git-sync');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.config) {
+          setGitSync(data.config);
+        }
+        if (data.logs) {
+          setGitSyncLogs(data.logs);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load Git sync configuration:', err);
+    } finally {
+      setIsLoadingGitSync(false);
+    }
+  };
+
+  const handleSaveGitSync = async (override?: Partial<AnsibleGitSyncData>) => {
+    setIsSavingGit(true);
+    try {
+      const payload = override ? { ...gitSync, ...override } : gitSync;
+      const res = await fetch('/api/config-mgmt/ansible-git-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.config) setGitSync(data.config);
+        if (data.logs) setGitSyncLogs(data.logs);
+        setIsGitEditing(false);
+        showNotification?.('GitHub integration settings saved. 30-min auto-sync is active.');
+      } else {
+        showNotification?.('Failed to update GitHub sync configuration');
+      }
+    } catch (err) {
+      showNotification?.('Error updating GitHub sync configuration');
+    } finally {
+      setIsSavingGit(false);
+    }
+  };
+
+  const handleTestGitConnection = async () => {
+    setIsTestingGit(true);
+    setGitTestResult(null);
+    try {
+      const res = await fetch('/api/config-mgmt/ansible-git-sync/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          repoUrl: gitSync.repoUrl,
+          branch: gitSync.branch,
+          token: gitSync.token
+        })
+      });
+      const data = await res.json();
+      setGitTestResult(data);
+      if (data.success) {
+        showNotification?.('GitHub connection verified successfully!');
+      } else {
+        showNotification?.('GitHub connection check failed: ' + data.message);
+      }
+    } catch (err: any) {
+      setGitTestResult({ success: false, message: err.message });
+      showNotification?.('Network error testing GitHub connection');
+    } finally {
+      setIsTestingGit(false);
+    }
+  };
+
+  const handlePullGitNow = async (force: boolean = false) => {
+    setIsPullingGit(true);
+    try {
+      const res = await fetch('/api/config-mgmt/ansible-git-sync/pull', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force })
+      });
+      const data = await res.json();
+      if (data.config) setGitSync(data.config);
+      if (data.logs) setGitSyncLogs(data.logs);
+
+      if (data.success) {
+        if (data.changesDetected) {
+          showNotification?.(`Pulled ${data.changedFiles?.length || 0} updated files from GitHub (${gitSync.branch})!`);
+        } else {
+          showNotification?.('Checked GitHub: Local files are already up-to-date with remote branch.');
+        }
+        // Refresh local playbooks and inventories in UI
+        fetchInventory();
+        fetchDirectoryInspection();
+      } else {
+        showNotification?.('GitHub Pull error: ' + data.message);
+      }
+    } catch (err: any) {
+      showNotification?.('Error pulling from GitHub: ' + err.message);
+    } finally {
+      setIsPullingGit(false);
     }
   };
 
@@ -444,7 +624,7 @@ export default function AnsibleConfigSection({ onBack, showNotification }: Ansib
       </div>
 
       {/* Quick Status Metric Tiles */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs space-y-1">
           <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-slate-400">
             <span>Ansible Working Directory</span>
@@ -495,6 +675,25 @@ export default function AnsibleConfigSection({ onBack, showNotification }: Ansib
           </div>
           <p className="text-[11px] text-slate-500 font-medium">
             Pipelining: {config.pipelining ? 'Active (Fast)' : 'Disabled'}
+          </p>
+        </div>
+
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs space-y-1">
+          <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            <span>GitHub Sync (30m Loop)</span>
+            <GitBranch size={14} className="text-indigo-500" />
+          </div>
+          <div className="text-sm font-black text-slate-900 truncate flex items-center gap-1.5">
+            <span className={`w-2 h-2 rounded-full ${
+              gitSync.lastStatus === 'synced' ? 'bg-emerald-500' :
+              gitSync.lastStatus === 'changes_pulled' ? 'bg-indigo-500' :
+              gitSync.lastStatus === 'checking' ? 'bg-blue-500 animate-ping' :
+              gitSync.lastStatus === 'error' ? 'bg-rose-500' : 'bg-slate-400'
+            }`} />
+            <span className="truncate">{gitSync.branch || 'main'}</span>
+          </div>
+          <p className="text-[11px] text-slate-500 font-medium truncate">
+            {gitSync.lastCommitHash ? `Commit ${gitSync.lastCommitHash.substring(0, 7)}` : 'Checked every 30m'}
           </p>
         </div>
       </div>
@@ -560,6 +759,454 @@ export default function AnsibleConfigSection({ onBack, showNotification }: Ansib
           </div>
         </motion.div>
       )}
+
+      {/* SECTION 1: GITHUB REPOSITORY INTEGRATION & CONTINUOUS 30-MIN SYNC */}
+      <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-xs space-y-6">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 border-b border-slate-100">
+          <div className="flex items-start gap-3.5">
+            <div className="p-2.5 bg-slate-900 text-white rounded-2xl shadow-xs shrink-0 mt-0.5">
+              <GitBranch size={20} />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-base font-black text-slate-900 tracking-tight">GitHub Configuration Integration</h3>
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                  <Clock size={12} className="text-indigo-600" />
+                  Checks every 30 mins
+                </span>
+                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
+                  gitSync.lastStatus === 'synced'
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                    : gitSync.lastStatus === 'changes_pulled'
+                    ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                    : gitSync.lastStatus === 'checking'
+                    ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                    : gitSync.lastStatus === 'error'
+                    ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                    : 'bg-slate-100 text-slate-600 border border-slate-200'
+                }`}>
+                  {gitSync.lastStatus === 'synced' && <CheckCircle2 size={12} className="text-emerald-600" />}
+                  {gitSync.lastStatus === 'changes_pulled' && <GitPullRequest size={12} className="text-indigo-600" />}
+                  {gitSync.lastStatus === 'checking' && <RefreshCw size={12} className="animate-spin text-blue-600" />}
+                  {gitSync.lastStatus === 'error' && <AlertCircle size={12} className="text-rose-600" />}
+                  {gitSync.lastStatus === 'idle' && <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />}
+                  <span>
+                    {gitSync.lastStatus === 'synced' ? 'Up to Date' :
+                     gitSync.lastStatus === 'changes_pulled' ? 'Changes Pulled' :
+                     gitSync.lastStatus === 'checking' ? 'Checking Remote...' :
+                     gitSync.lastStatus === 'error' ? 'Sync Advisory' : 'Ready'}
+                  </span>
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Store your playbooks, roles, and inventory files in GitHub. The application continuously inspects GitHub every 30 minutes and automatically pulls updates into your active workspace.
+              </p>
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleTestGitConnection}
+              disabled={isTestingGit || !gitSync.repoUrl}
+              className="flex items-center gap-1.5 px-3 py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold text-xs rounded-xl transition-all disabled:opacity-50"
+              title="Verify GitHub repository reachability and remote branch"
+            >
+              {isTestingGit ? <RefreshCw size={13} className="animate-spin" /> : <Globe size={13} />}
+              <span>{isTestingGit ? 'Verifying...' : 'Test Connection'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handlePullGitNow(false)}
+              disabled={isPullingGit || !gitSync.repoUrl}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all disabled:opacity-50"
+              title="Check GitHub immediately and pull any new commits into local playbooks, roles, and inventory"
+            >
+              {isPullingGit ? <RefreshCw size={13} className="animate-spin" /> : <GitPullRequest size={13} />}
+              <span>{isPullingGit ? 'Checking & Pulling...' : 'Check & Pull Now'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsGitEditing(!isGitEditing)}
+              className={`flex items-center gap-1.5 px-3 py-2 font-bold text-xs rounded-xl border transition-all ${
+                isGitEditing 
+                  ? 'bg-slate-900 text-white border-slate-900' 
+                  : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
+              }`}
+            >
+              <Wrench size={13} />
+              <span>{isGitEditing ? 'Close Settings' : 'Configure Repo'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowGitLogs(!showGitLogs)}
+              className={`flex items-center gap-1.5 px-3 py-2 font-bold text-xs rounded-xl border transition-all ${
+                showGitLogs
+                  ? 'bg-slate-200 text-slate-900 border-slate-300'
+                  : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
+              }`}
+            >
+              <History size={13} />
+              <span>History ({gitSyncLogs.length})</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Git Test Connection Result Notice */}
+        {gitTestResult && (
+          <div className={`p-4 rounded-2xl border text-xs flex items-start justify-between gap-3 ${
+            gitTestResult.success 
+              ? 'bg-emerald-50/80 border-emerald-200 text-emerald-950' 
+              : 'bg-rose-50/80 border-rose-200 text-rose-950'
+          }`}>
+            <div className="flex items-start gap-2.5">
+              {gitTestResult.success ? (
+                <CheckCircle2 size={16} className="text-emerald-600 mt-0.5 shrink-0" />
+              ) : (
+                <AlertCircle size={16} className="text-rose-600 mt-0.5 shrink-0" />
+              )}
+              <div className="space-y-1">
+                <p className="font-bold">{gitTestResult.message}</p>
+                {gitTestResult.remoteHead && (
+                  <p className="font-mono text-[11px] opacity-80">Remote HEAD Commit: {gitTestResult.remoteHead}</p>
+                )}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setGitTestResult(null)}
+              className="text-slate-400 hover:text-slate-600 text-xs font-bold px-1"
+            >
+              &times;
+            </button>
+          </div>
+        )}
+
+        {/* Current Sync Telemetry Bar */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-slate-50/80 border border-slate-200/80 rounded-2xl p-4">
+          <div className="space-y-1">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Repository & Branch</span>
+            <div className="flex items-center gap-1.5 font-mono text-xs text-slate-800 font-bold truncate">
+              <GitBranch size={13} className="text-indigo-600 shrink-0" />
+              <span className="truncate">{gitSync.repoUrl ? gitSync.repoUrl.replace('https://github.com/', '') : 'Not Configured'}</span>
+            </div>
+            <p className="text-[11px] text-slate-500 flex items-center gap-1">
+              <span>Branch:</span>
+              <span className="font-mono font-bold text-slate-700 bg-white px-1.5 py-0.2 rounded border">{gitSync.branch || 'main'}</span>
+            </p>
+          </div>
+
+          <div className="space-y-1">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">30-Min Schedule Cycle</span>
+            <div className="flex items-center gap-1.5 text-xs text-slate-800 font-bold">
+              <Clock size={13} className="text-blue-600 shrink-0" />
+              <span>
+                {gitSync.enabled ? 'Active (Every 30 Mins)' : 'Scheduled Polling Paused'}
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500 truncate">
+              {gitSync.lastCheckedAt 
+                ? `Last checked: ${new Date(gitSync.lastCheckedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` 
+                : 'Initial scan pending'}
+            </p>
+          </div>
+
+          <div className="space-y-1">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Latest Pulled Commit</span>
+            <div className="flex items-center gap-1.5 text-xs font-mono text-slate-800 font-bold truncate">
+              <GitCommit size={13} className="text-emerald-600 shrink-0" />
+              <span>{gitSync.lastCommitHash ? gitSync.lastCommitHash.substring(0, 7) : 'None pulled yet'}</span>
+            </div>
+            <p className="text-[11px] text-slate-500 truncate" title={gitSync.lastCommitMessage}>
+              {gitSync.lastCommitMessage || (gitSync.repoUrl ? 'Remote synchronized' : 'Awaiting repo URL')}
+            </p>
+          </div>
+
+          <div className="space-y-1">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Auto-Synced Artifacts</span>
+            <div className="flex flex-wrap gap-1 pt-0.5">
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-white border border-slate-200 text-slate-700">
+                playbooks/
+              </span>
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-white border border-slate-200 text-slate-700">
+                roles/
+              </span>
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-white border border-slate-200 text-slate-700">
+                hosts.ini
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500">
+              {gitSync.changedFilesCount !== undefined ? `${gitSync.changedFilesCount} files affected in last pull` : 'Ready to receive changes'}
+            </p>
+          </div>
+        </div>
+
+        {/* Configuration Edit Form (Collapsible) */}
+        <AnimatePresence>
+          {isGitEditing && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="overflow-hidden"
+            >
+              <div className="bg-slate-50/90 border border-slate-200 rounded-2xl p-5 space-y-5">
+                <div className="flex items-center justify-between border-b border-slate-200/80 pb-3">
+                  <div className="flex items-center gap-2">
+                    <FolderGit2 size={16} className="text-slate-700" />
+                    <h4 className="text-sm font-extrabold text-slate-900">Configure GitHub Repository & Continuous Pull</h4>
+                  </div>
+                  <span className="text-xs text-slate-500">Changes take effect immediately on next cycle</span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+                  {/* Repo URL */}
+                  <div className="md:col-span-8 space-y-1.5">
+                    <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                      <span>GitHub Repository URL (HTTPS)</span>
+                      <span className="text-[10px] font-normal text-slate-500">e.g., https://github.com/organization/ansible-configs.git</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={gitSync.repoUrl}
+                      onChange={(e) => setGitSync({ ...gitSync, repoUrl: e.target.value })}
+                      placeholder="https://github.com/organization/ansible-configs.git"
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                    />
+                  </div>
+
+                  {/* Branch */}
+                  <div className="md:col-span-4 space-y-1.5">
+                    <label className="text-xs font-bold text-slate-700">Target Git Branch</label>
+                    <input
+                      type="text"
+                      value={gitSync.branch}
+                      onChange={(e) => setGitSync({ ...gitSync, branch: e.target.value })}
+                      placeholder="main"
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                    />
+                  </div>
+
+                  {/* GitHub Personal Access Token */}
+                  <div className="md:col-span-8 space-y-1.5">
+                    <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <Lock size={12} className="text-slate-500" />
+                        <span>GitHub Token / PAT (Required for Private Repositories)</span>
+                      </span>
+                      {gitSync.hasToken && (
+                        <span className="text-[10px] text-emerald-600 font-bold flex items-center gap-1">
+                          <CheckCircle2 size={11} /> Token Saved
+                        </span>
+                      )}
+                    </label>
+                    <input
+                      type="password"
+                      value={gitSync.token || ''}
+                      onChange={(e) => setGitSync({ ...gitSync, token: e.target.value })}
+                      placeholder={gitSync.hasToken ? "•••••••••••••••••••••••• (Leave blank to keep current token)" : "ghp_xxxxxxxxxxxxxxxxxxxx (Optional for public repos)"}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                    />
+                  </div>
+
+                  {/* Polling Interval */}
+                  <div className="md:col-span-4 space-y-1.5">
+                    <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                      <Clock size={12} className="text-slate-500" />
+                      <span>Sync Check Interval</span>
+                    </label>
+                    <select
+                      value={gitSync.syncIntervalMinutes}
+                      onChange={(e) => setGitSync({ ...gitSync, syncIntervalMinutes: parseInt(e.target.value, 10) || 30 })}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                    >
+                      <option value={15}>Every 15 minutes</option>
+                      <option value={30}>Every 30 minutes (Standard User Request)</option>
+                      <option value={60}>Every 60 minutes</option>
+                      <option value={120}>Every 2 hours</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Synchronization Scope & Toggles */}
+                <div className="pt-3 border-t border-slate-200/80 space-y-3">
+                  <span className="text-xs font-bold text-slate-800 block">Configuration Components to Synchronize from GitHub</span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+                    <label className="flex items-center gap-2 p-2.5 bg-white rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={gitSync.syncPlaybooks}
+                        onChange={(e) => setGitSync({ ...gitSync, syncPlaybooks: e.target.checked })}
+                        className="rounded text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <div>
+                        <span className="font-bold block text-slate-800">Playbooks</span>
+                        <span className="text-[10px] text-slate-500">playbooks/*.yml</span>
+                      </div>
+                    </label>
+
+                    <label className="flex items-center gap-2 p-2.5 bg-white rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={gitSync.syncRoles}
+                        onChange={(e) => setGitSync({ ...gitSync, syncRoles: e.target.checked })}
+                        className="rounded text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <div>
+                        <span className="font-bold block text-slate-800">Roles</span>
+                        <span className="text-[10px] text-slate-500">roles/* subtrees</span>
+                      </div>
+                    </label>
+
+                    <label className="flex items-center gap-2 p-2.5 bg-white rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={gitSync.syncInventory}
+                        onChange={(e) => setGitSync({ ...gitSync, syncInventory: e.target.checked })}
+                        className="rounded text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <div>
+                        <span className="font-bold block text-slate-800">Inventory Files</span>
+                        <span className="text-[10px] text-slate-500">hosts.ini / inventory</span>
+                      </div>
+                    </label>
+
+                    <label className="flex items-center gap-2 p-2.5 bg-white rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={gitSync.syncAnsibleCfg}
+                        onChange={(e) => setGitSync({ ...gitSync, syncAnsibleCfg: e.target.checked })}
+                        className="rounded text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <div>
+                        <span className="font-bold block text-slate-800">Ansible Config</span>
+                        <span className="text-[10px] text-slate-500">ansible.cfg root file</span>
+                      </div>
+                    </label>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={gitSync.autoPullChanges}
+                        onChange={(e) => setGitSync({ ...gitSync, autoPullChanges: e.target.checked })}
+                        className="rounded text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <span className="text-xs font-bold text-slate-800">
+                        Automatically pull code into workspace whenever differences are detected in Git
+                      </span>
+                    </label>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsGitEditing(false)}
+                        className="px-3 py-1.5 text-xs font-bold text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSaveGitSync()}
+                        disabled={isSavingGit}
+                        className="flex items-center gap-1.5 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors disabled:opacity-50"
+                      >
+                        {isSavingGit ? <RefreshCw size={13} className="animate-spin" /> : <Save size={13} />}
+                        <span>Save GitHub Settings</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Sync Audit History Drawer (Collapsible) */}
+        <AnimatePresence>
+          {showGitLogs && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="overflow-hidden"
+            >
+              <div className="bg-slate-50/90 border border-slate-200 rounded-2xl p-4 space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-200/80 pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <History size={15} className="text-slate-700" />
+                    <h4 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">GitHub Pull & 30-Min Sync Audit Log</h4>
+                  </div>
+                  <span className="text-[11px] text-slate-500">{gitSyncLogs.length} events recorded</span>
+                </div>
+
+                {gitSyncLogs.length === 0 ? (
+                  <div className="text-center py-6 text-slate-400 text-xs">
+                    No Git sync operations recorded yet. Click &ldquo;Check & Pull Now&rdquo; to trigger initial synchronization.
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                    {gitSyncLogs.map((log) => (
+                      <div
+                        key={log.id}
+                        className="p-3 bg-white rounded-xl border border-slate-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                      >
+                        <div className="flex items-start gap-2.5">
+                          <span className={`px-2 py-0.5 rounded-md font-bold text-[10px] uppercase font-mono mt-0.5 ${
+                            log.status === 'CHANGED'
+                              ? 'bg-indigo-100 text-indigo-800'
+                              : log.status === 'NO_CHANGES'
+                              ? 'bg-slate-100 text-slate-700'
+                              : log.status === 'SUCCESS'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-rose-100 text-rose-800'
+                          }`}>
+                            {log.status}
+                          </span>
+                          <div className="space-y-0.5">
+                            <p className="font-semibold text-slate-800">{log.message}</p>
+                            {log.commitHash && (
+                              <p className="text-[11px] font-mono text-slate-500 flex items-center gap-1.5">
+                                <GitCommit size={11} className="text-slate-400" />
+                                <span>{log.commitHash.substring(0, 8)}</span>
+                                {log.commitMessage && <span className="italic truncate max-w-xs">&ldquo;{log.commitMessage}&rdquo;</span>}
+                              </p>
+                            )}
+                            {log.changedFiles && log.changedFiles.length > 0 && (
+                              <div className="flex flex-wrap gap-1 pt-1">
+                                {log.changedFiles.slice(0, 4).map((f, i) => (
+                                  <span key={i} className="px-1.5 py-0.2 bg-slate-50 border rounded text-[10px] font-mono text-slate-600">
+                                    {f}
+                                  </span>
+                                ))}
+                                {log.changedFiles.length > 4 && (
+                                  <span className="text-[10px] text-slate-400">+{log.changedFiles.length - 4} more</span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="text-right shrink-0 text-[11px] text-slate-400 font-mono">
+                          <div>{new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</div>
+                          {log.durationMs !== undefined && (
+                            <div className="text-[10px] text-slate-400">{log.durationMs}ms</div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
 
       {/* Main Settings Form Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">

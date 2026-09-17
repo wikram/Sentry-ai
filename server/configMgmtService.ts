@@ -1223,3 +1223,538 @@ export function getAnsibleCfgContent(customConfig?: Partial<AnsibleConfig>): { p
 
   return { path: cfgPath, content: '', exists: false };
 }
+
+// ==========================================
+// 8. GITHUB INTEGRATION & AUTOMATED REPO SYNC
+// ==========================================
+
+export interface AnsibleGitSyncConfig {
+  enabled: boolean;
+  repoUrl: string;
+  branch: string;
+  targetDirectory: string;
+  syncIntervalMinutes: number;
+  authType: 'none' | 'token';
+  token?: string;
+  autoPullChanges: boolean;
+  syncInventory: boolean;
+  syncPlaybooks: boolean;
+  syncRoles: boolean;
+  syncAnsibleCfg: boolean;
+  lastStatus: 'idle' | 'checking' | 'synced' | 'changes_pulled' | 'error';
+  lastStatusMessage?: string;
+  lastCheckedAt?: string;
+  lastPulledAt?: string;
+  lastCommitHash?: string;
+  lastCommitMessage?: string;
+  lastCommitAuthor?: string;
+  lastCommitDate?: string;
+  changedFilesCount?: number;
+  lastChangedFiles?: string[];
+  nextScheduledCheck?: string;
+}
+
+export interface AnsibleGitSyncLogEntry {
+  id: string;
+  timestamp: string;
+  type: 'CHECK' | 'PULL' | 'CLONE' | 'ERROR';
+  status: 'SUCCESS' | 'NO_CHANGES' | 'CHANGED' | 'ERROR';
+  commitHash?: string;
+  commitMessage?: string;
+  changedFiles?: string[];
+  message: string;
+  durationMs?: number;
+}
+
+const ANSIBLE_GIT_SYNC_FILE = path.join(process.cwd(), 'logs', 'ansible_git_sync.json');
+const ANSIBLE_GIT_LOGS_FILE = path.join(process.cwd(), 'logs', 'ansible_git_logs.json');
+
+const DEFAULT_GIT_SYNC_CONFIG: AnsibleGitSyncConfig = {
+  enabled: true,
+  repoUrl: 'https://github.com/ansible/ansible-examples.git',
+  branch: 'master',
+  targetDirectory: 'ansible-repo',
+  syncIntervalMinutes: 30, // Poll every 30 mins
+  authType: 'none',
+  token: '',
+  autoPullChanges: true,
+  syncInventory: true,
+  syncPlaybooks: true,
+  syncRoles: true,
+  syncAnsibleCfg: false,
+  lastStatus: 'idle',
+  lastStatusMessage: 'Scheduled to check remote repository every 30 minutes',
+  lastCheckedAt: undefined,
+  lastPulledAt: undefined,
+  lastCommitHash: undefined,
+  lastCommitMessage: undefined,
+  lastCommitAuthor: undefined,
+  changedFilesCount: 0,
+  lastChangedFiles: []
+};
+
+let syncTimer: NodeJS.Timeout | null = null;
+let nextScheduledCheckTime: Date | null = null;
+
+export function loadAnsibleGitSyncConfig(): AnsibleGitSyncConfig {
+  ensureDirs();
+  if (fs.existsSync(ANSIBLE_GIT_SYNC_FILE)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(ANSIBLE_GIT_SYNC_FILE, 'utf-8'));
+      return { ...DEFAULT_GIT_SYNC_CONFIG, ...data };
+    } catch {
+      return DEFAULT_GIT_SYNC_CONFIG;
+    }
+  }
+  return DEFAULT_GIT_SYNC_CONFIG;
+}
+
+export function saveAnsibleGitSyncConfig(updates: Partial<AnsibleGitSyncConfig>): AnsibleGitSyncConfig {
+  ensureDirs();
+  const current = loadAnsibleGitSyncConfig();
+  const updated: AnsibleGitSyncConfig = {
+    ...current,
+    ...updates
+  };
+
+  fs.writeFileSync(ANSIBLE_GIT_SYNC_FILE, JSON.stringify(updated, null, 2), 'utf-8');
+
+  // If interval or enabled state changed, restart the scheduler
+  if (
+    updates.enabled !== undefined && updates.enabled !== current.enabled ||
+    updates.syncIntervalMinutes !== undefined && updates.syncIntervalMinutes !== current.syncIntervalMinutes
+  ) {
+    startAnsibleGitSyncScheduler();
+  }
+
+  return updated;
+}
+
+export function loadAnsibleGitSyncLogs(): AnsibleGitSyncLogEntry[] {
+  ensureDirs();
+  if (fs.existsSync(ANSIBLE_GIT_LOGS_FILE)) {
+    try {
+      return JSON.parse(fs.readFileSync(ANSIBLE_GIT_LOGS_FILE, 'utf-8'));
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+export function addAnsibleGitSyncLog(entry: Omit<AnsibleGitSyncLogEntry, 'id'>): void {
+  ensureDirs();
+  const logs = loadAnsibleGitSyncLogs();
+  const newEntry: AnsibleGitSyncLogEntry = {
+    ...entry,
+    id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+  };
+  const updated = [newEntry, ...logs.slice(0, 99)]; // retain 100 most recent logs
+  fs.writeFileSync(ANSIBLE_GIT_LOGS_FILE, JSON.stringify(updated, null, 2), 'utf-8');
+}
+
+function getAuthenticatedGitUrl(url: string, token?: string): string {
+  if (!token || !token.trim()) return url;
+  try {
+    const trimmed = token.trim();
+    if (url.startsWith('https://')) {
+      const urlWithoutScheme = url.slice(8);
+      // Remove any existing user info in URL
+      const cleanUrl = urlWithoutScheme.includes('@') ? urlWithoutScheme.split('@')[1] : urlWithoutScheme;
+      return `https://${encodeURIComponent(trimmed)}@${cleanUrl}`;
+    }
+    return url;
+  } catch {
+    return url;
+  }
+}
+
+function sanitizeMessage(msg: string, token?: string): string {
+  if (!token || !token.trim()) return msg;
+  return msg.split(token.trim()).join('***');
+}
+
+export async function testGitHubConnection(
+  repoUrl: string,
+  branch: string,
+  token?: string
+): Promise<{ success: boolean; message: string; remoteHead?: string }> {
+  try {
+    if (!repoUrl || !repoUrl.trim()) {
+      return { success: false, message: 'Repository URL is required' };
+    }
+
+    const authUrl = getAuthenticatedGitUrl(repoUrl.trim(), token);
+    const targetBranch = branch?.trim() || 'main';
+
+    // Query remote refs using git ls-remote (fast, doesn't download repo)
+    const cmd = `git ls-remote --heads "${authUrl}" "${targetBranch}"`;
+    const output = execSync(cmd, { timeout: 15000, stdio: ['pipe', 'pipe', 'pipe'] }).toString().trim();
+
+    if (!output) {
+      // Try listing all heads in case branch name differed
+      const allHeads = execSync(`git ls-remote --heads "${authUrl}"`, { timeout: 15000 }).toString().trim();
+      if (allHeads) {
+        const availableBranches = allHeads
+          .split('\n')
+          .map(line => line.split('refs/heads/')[1])
+          .filter(Boolean)
+          .slice(0, 5);
+
+        return {
+          success: false,
+          message: `Repository reachable, but branch '${targetBranch}' was not found. Available branches: ${availableBranches.join(', ')}`
+        };
+      }
+      return {
+        success: false,
+        message: `Branch '${targetBranch}' was not found in remote repository.`
+      };
+    }
+
+    const [sha] = output.split(/\s+/);
+    return {
+      success: true,
+      message: `Connection verified. Remote branch '${targetBranch}' found at commit ${sha.slice(0, 8)}.`,
+      remoteHead: sha.slice(0, 8)
+    };
+  } catch (err: any) {
+    const rawError = err.stderr ? err.stderr.toString() : err.message;
+    const cleanError = sanitizeMessage(rawError, token);
+    return {
+      success: false,
+      message: `Connection failed: ${cleanError}`
+    };
+  }
+}
+
+// Copy directory recursively helper
+function copyDirRecursive(src: string, dest: string, fileExtensionFilter?: string) {
+  if (!fs.existsSync(src)) return;
+  if (!fs.existsSync(dest)) {
+    fs.mkdirSync(dest, { recursive: true });
+  }
+
+  const entries = fs.readdirSync(src, { withFileTypes: true });
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+
+    if (entry.isDirectory()) {
+      if (entry.name !== '.git' && entry.name !== 'node_modules') {
+        copyDirRecursive(srcPath, destPath, fileExtensionFilter);
+      }
+    } else if (entry.isFile()) {
+      if (!fileExtensionFilter || entry.name.endsWith(fileExtensionFilter) || fileExtensionFilter === '*') {
+        fs.copyFileSync(srcPath, destPath);
+      }
+    }
+  }
+}
+
+export async function syncAnsibleFromGitHub(forcePull: boolean = false): Promise<{
+  success: boolean;
+  changesDetected: boolean;
+  message: string;
+  commit?: { hash: string; message: string; author: string; date: string };
+  changedFiles?: string[];
+  logEntry?: AnsibleGitSyncLogEntry;
+}> {
+  const startTime = Date.now();
+  const config = loadAnsibleGitSyncConfig();
+
+  if (!config.repoUrl || !config.repoUrl.trim()) {
+    const errorMsg = 'GitHub repository URL is not configured';
+    saveAnsibleGitSyncConfig({
+      lastStatus: 'error',
+      lastStatusMessage: errorMsg,
+      lastCheckedAt: new Date().toISOString()
+    });
+    return { success: false, changesDetected: false, message: errorMsg };
+  }
+
+  const repoUrl = config.repoUrl.trim();
+  const branch = config.branch?.trim() || 'main';
+  const targetDir = path.isAbsolute(config.targetDirectory)
+    ? config.targetDirectory
+    : path.resolve(process.cwd(), config.targetDirectory || 'ansible-repo');
+  const authUrl = getAuthenticatedGitUrl(repoUrl, config.token);
+
+  saveAnsibleGitSyncConfig({
+    lastStatus: 'checking',
+    lastStatusMessage: 'Connecting to GitHub repository and checking for changes...',
+    lastCheckedAt: new Date().toISOString()
+  });
+
+  try {
+    let changesDetected = false;
+    let actionType: 'CLONE' | 'PULL' | 'CHECK' = 'CHECK';
+    let changedFiles: string[] = [];
+    const isCloned = fs.existsSync(path.join(targetDir, '.git'));
+
+    if (!isCloned) {
+      // 1. Initial Clone
+      actionType = 'CLONE';
+      changesDetected = true;
+      if (!fs.existsSync(targetDir)) {
+        fs.mkdirSync(targetDir, { recursive: true });
+      }
+
+      console.log(`[Ansible Git Sync] Cloning ${repoUrl} (${branch}) into ${targetDir}...`);
+      execSync(`git clone --branch "${branch}" --depth 1 "${authUrl}" "${targetDir}"`, {
+        timeout: 45000,
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+
+      // Retrieve all files in cloned repo
+      try {
+        const fileListOut = execSync(`git -C "${targetDir}" ls-files`, { timeout: 5000 }).toString().trim();
+        changedFiles = fileListOut ? fileListOut.split('\n') : [];
+      } catch {
+        changedFiles = ['Initial repository clone'];
+      }
+    } else {
+      // 2. Existing clone: Fetch and compare HEAD with origin/branch
+      // Update remote origin URL in case token or URL was updated in settings
+      execSync(`git -C "${targetDir}" remote set-url origin "${authUrl}"`, { timeout: 5000 });
+      execSync(`git -C "${targetDir}" fetch origin "${branch}"`, {
+        timeout: 30000,
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+
+      const localSha = execSync(`git -C "${targetDir}" rev-parse HEAD`, { timeout: 5000 }).toString().trim();
+      const remoteSha = execSync(`git -C "${targetDir}" rev-parse "origin/${branch}"`, { timeout: 5000 }).toString().trim();
+
+      if (localSha !== remoteSha || forcePull) {
+        changesDetected = true;
+        actionType = 'PULL';
+
+        // Check which files changed between current and new remote
+        try {
+          const diffOut = execSync(`git -C "${targetDir}" diff --name-only HEAD "origin/${branch}"`, { timeout: 5000 })
+            .toString()
+            .trim();
+          changedFiles = diffOut ? diffOut.split('\n').filter(Boolean) : [];
+        } catch {
+          changedFiles = [];
+        }
+
+        console.log(`[Ansible Git Sync] Pulling ${changedFiles.length} updated files from GitHub (origin/${branch})...`);
+        execSync(`git -C "${targetDir}" pull origin "${branch}"`, {
+          timeout: 30000,
+          stdio: ['pipe', 'pipe', 'pipe']
+        });
+      } else {
+        changesDetected = false;
+        actionType = 'CHECK';
+      }
+    }
+
+    // Retrieve latest commit info
+    let commitInfo = { hash: '', message: '', author: '', date: '' };
+    try {
+      const commitOut = execSync(`git -C "${targetDir}" log -1 --pretty=format:"%h|%s|%an|%ad" --date=short`, { timeout: 5000 })
+        .toString()
+        .trim();
+      const [h, s, a, d] = commitOut.split('|');
+      commitInfo = { hash: h || '', message: s || '', author: a || '', date: d || '' };
+    } catch (e: any) {
+      commitInfo = { hash: 'HEAD', message: 'Current revision', author: 'Git User', date: new Date().toLocaleDateString() };
+    }
+
+    // 3. Artifact Synchronization into Devops Studio locations
+    if (changesDetected) {
+      // Sync Playbooks
+      if (config.syncPlaybooks) {
+        const repoPlaybooksDir = path.join(targetDir, 'playbooks');
+        const activePlaybooksDir = PLAYBOOKS_DIR;
+        if (fs.existsSync(repoPlaybooksDir)) {
+          copyDirRecursive(repoPlaybooksDir, activePlaybooksDir);
+        } else {
+          // If playbooks are in root of repo (*.yml or *.yaml)
+          const rootFiles = fs.readdirSync(targetDir);
+          for (const f of rootFiles) {
+            if (f.endsWith('.yml') || f.endsWith('.yaml')) {
+              fs.copyFileSync(path.join(targetDir, f), path.join(activePlaybooksDir, f));
+            }
+          }
+        }
+      }
+
+      // Sync Roles
+      if (config.syncRoles) {
+        const repoRolesDir = path.join(targetDir, 'roles');
+        const activeRolesDir = path.join(process.cwd(), 'roles');
+        if (fs.existsSync(repoRolesDir)) {
+          copyDirRecursive(repoRolesDir, activeRolesDir);
+        }
+      }
+
+      // Sync Inventory
+      if (config.syncInventory) {
+        const candidates = [
+          path.join(targetDir, 'inventory', 'hosts.ini'),
+          path.join(targetDir, 'inventory', 'hosts'),
+          path.join(targetDir, 'hosts.ini'),
+          path.join(targetDir, 'hosts')
+        ];
+        for (const candidate of candidates) {
+          if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+            const activeInv = path.join(process.cwd(), 'inventory', 'hosts.ini');
+            ensureDirs();
+            fs.copyFileSync(candidate, activeInv);
+            break;
+          }
+        }
+      }
+
+      // Sync ansible.cfg if requested and exists in repo
+      if (config.syncAnsibleCfg) {
+        const repoCfg = path.join(targetDir, 'ansible.cfg');
+        if (fs.existsSync(repoCfg)) {
+          fs.copyFileSync(repoCfg, path.join(process.cwd(), 'ansible.cfg'));
+        }
+      }
+    }
+
+    const durationMs = Date.now() - startTime;
+    const nowIso = new Date().toISOString();
+
+    let statusMsg = '';
+    if (actionType === 'CLONE') {
+      statusMsg = `Successfully cloned repository from GitHub (${branch}) at commit ${commitInfo.hash}. Initialized ${changedFiles.length} artifacts.`;
+    } else if (actionType === 'PULL') {
+      statusMsg = `Pulled ${changedFiles.length} updated files from GitHub (Commit ${commitInfo.hash}: "${commitInfo.message}").`;
+    } else {
+      statusMsg = `Repository is up to date with origin/${branch} at commit ${commitInfo.hash}. Checked in ${durationMs}ms.`;
+    }
+
+    const updatedConfig = saveAnsibleGitSyncConfig({
+      lastStatus: changesDetected ? 'changes_pulled' : 'synced',
+      lastStatusMessage: statusMsg,
+      lastCheckedAt: nowIso,
+      lastPulledAt: changesDetected ? nowIso : config.lastPulledAt,
+      lastCommitHash: commitInfo.hash,
+      lastCommitMessage: commitInfo.message,
+      lastCommitAuthor: commitInfo.author,
+      lastCommitDate: commitInfo.date,
+      changedFilesCount: changesDetected ? changedFiles.length : (config.changedFilesCount || 0),
+      lastChangedFiles: changesDetected ? changedFiles.slice(0, 25) : config.lastChangedFiles
+    });
+
+    const logEntry: AnsibleGitSyncLogEntry = {
+      id: `log-${Date.now()}`,
+      timestamp: nowIso,
+      type: actionType,
+      status: changesDetected ? 'CHANGED' : 'NO_CHANGES',
+      commitHash: commitInfo.hash,
+      commitMessage: commitInfo.message,
+      changedFiles: changedFiles.slice(0, 10),
+      message: statusMsg,
+      durationMs
+    };
+
+    addAnsibleGitSyncLog(logEntry);
+
+    return {
+      success: true,
+      changesDetected,
+      message: statusMsg,
+      commit: commitInfo,
+      changedFiles,
+      logEntry
+    };
+  } catch (err: any) {
+    const rawError = err.stderr ? err.stderr.toString() : err.message;
+    const cleanError = sanitizeMessage(rawError, config.token);
+    const durationMs = Date.now() - startTime;
+    const errorMsg = `Sync failed: ${cleanError}`;
+
+    saveAnsibleGitSyncConfig({
+      lastStatus: 'error',
+      lastStatusMessage: errorMsg,
+      lastCheckedAt: new Date().toISOString()
+    });
+
+    const logEntry: AnsibleGitSyncLogEntry = {
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      type: 'ERROR',
+      status: 'ERROR',
+      message: errorMsg,
+      durationMs
+    };
+    addAnsibleGitSyncLog(logEntry);
+
+    return {
+      success: false,
+      changesDetected: false,
+      message: errorMsg,
+      logEntry
+    };
+  }
+}
+
+export function startAnsibleGitSyncScheduler() {
+  if (syncTimer) {
+    clearInterval(syncTimer);
+    syncTimer = null;
+  }
+
+  const config = loadAnsibleGitSyncConfig();
+  if (!config.enabled) {
+    nextScheduledCheckTime = null;
+    return;
+  }
+
+  const intervalMinutes = Math.max(1, config.syncIntervalMinutes || 30);
+  const intervalMs = intervalMinutes * 60 * 1000;
+  nextScheduledCheckTime = new Date(Date.now() + intervalMs);
+
+  console.log(`[Ansible Git Sync] Scheduled 30-minute sync watcher started. Next check in ${intervalMinutes} minutes (${nextScheduledCheckTime.toISOString()}).`);
+
+  syncTimer = setInterval(async () => {
+    try {
+      const currentConfig = loadAnsibleGitSyncConfig();
+      if (!currentConfig.enabled) {
+        return;
+      }
+      console.log(`[Ansible Git Sync] 30-min scheduled poll running for: ${currentConfig.repoUrl} (Branch: ${currentConfig.branch})`);
+      await syncAnsibleFromGitHub(false);
+
+      const nextIntervalMs = Math.max(1, currentConfig.syncIntervalMinutes || 30) * 60 * 1000;
+      nextScheduledCheckTime = new Date(Date.now() + nextIntervalMs);
+    } catch (err: any) {
+      console.error('[Ansible Git Sync] Scheduled check exception:', err.message);
+    }
+  }, intervalMs);
+}
+
+export function stopAnsibleGitSyncScheduler() {
+  if (syncTimer) {
+    clearInterval(syncTimer);
+    syncTimer = null;
+  }
+  nextScheduledCheckTime = null;
+}
+
+export function getAnsibleGitSyncStatus() {
+  const config = loadAnsibleGitSyncConfig();
+  const logs = loadAnsibleGitSyncLogs().slice(0, 20);
+
+  // Mask token before sending over API
+  const sanitizedConfig = {
+    ...config,
+    token: config.token && config.token.length > 4
+      ? `${config.token.slice(0, 4)}••••••••${config.token.slice(-4)}`
+      : config.token ? '••••••••' : '',
+    hasToken: Boolean(config.token && config.token.trim()),
+    nextScheduledCheck: nextScheduledCheckTime ? nextScheduledCheckTime.toISOString() : undefined
+  };
+
+  return {
+    config: sanitizedConfig,
+    logs,
+    nextScheduledCheck: nextScheduledCheckTime ? nextScheduledCheckTime.toISOString() : undefined
+  };
+}
