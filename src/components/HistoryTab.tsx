@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import { 
@@ -150,7 +150,7 @@ export const extractAnalysisResponse = (raw: any): ExtractedAnalysisData => {
     }
   }
 
-  // 4. If remediations array is present (as in /api/log-analysis format), format as rich structured report
+  // 4. If remediations array is present (as in /api/history details format), format as rich structured report
   const remediationsList = 
     (Array.isArray(obj.remediations) && obj.remediations.length > 0 ? obj.remediations : null) ||
     (Array.isArray(raw.remediations) && raw.remediations.length > 0 ? raw.remediations : null) ||
@@ -279,6 +279,27 @@ interface HistoryTabProps {
   supportedModels?: any[];
   preferredBackendUrl?: string;
 }
+
+// Converts filter chips to /api/history query parameters. The backend takes one value per
+// filter and matches codes exactly, so anything else stays a client-side filter.
+export const buildHistoryQuery = (chips: FilterChip[]): string => {
+  const values = (key: FilterChip['key']) => chips.filter(c => c.key === key).map(c => c.value.trim());
+  const params = new URLSearchParams();
+
+  const statuses = values('status');
+  if (statuses.length === 1) params.set('status', statuses[0].toLowerCase());
+
+  const models = values('model');
+  if (models.length === 1) params.set('model_name', models[0]);
+
+  const ids = values('id');
+  if (ids.length === 1 && /^ANL-\d{10,}$/i.test(ids[0])) params.set('analysis_code', ids[0].toUpperCase());
+
+  const contentTerms = [...values('logs'), ...values('search')];
+  if (contentTerms.length > 0) params.set('content_query', contentTerms.join(' '));
+
+  return params.toString();
+};
 
 const FALLBACK_OPENROUTER_MODELS = [
   { id: 'openai/gpt-4o', name: 'OpenAI: GPT-4o' },
@@ -432,44 +453,34 @@ export default function HistoryTab({
     return current;
   };
 
-  const fetchLogAnalysis = async (analysisCode: string, item: HistoryItem) => {
+  const fetchHistoryDetails = async (url: string) => {
+    try {
+      const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
+      if (!response.ok) {
+        console.warn(`[HistoryTab] ${url} returned HTTP ${response.status}`);
+        return null;
+      }
+      const data = await response.json();
+      return Array.isArray(data?.history) && data.history.length > 0 ? data : null;
+    } catch (err) {
+      console.warn(`[HistoryTab] Failed to fetch ${url}:`, err);
+      return null;
+    }
+  };
+
+  const fetchAnalysisDetails = async (analysisCode: string, item: HistoryItem) => {
     try {
       setFetchingAnalysisCode(analysisCode);
-      console.log(`[HistoryTab] Calling /api/log-analysis with p_analysis_code="${analysisCode}"`);
+      console.log(`[HistoryTab] Fetching history details for analysis_code="${analysisCode}"`);
 
-      const base = preferredBackendUrl 
-        ? `${preferredBackendUrl.replace(/\/$/, '')}/api/log-analysis` 
-        : '/api/log-analysis';
-      const endpoint = `${base}?p_analysis_code=${encodeURIComponent(analysisCode)}`;
+      const params = new URLSearchParams({ analysis_code: analysisCode, include_details: 'true' });
+      // Runs on local models are not on the external backend, only on this server
+      const data =
+        (preferredBackendUrl ? await fetchHistoryDetails(`${preferredBackendUrl.replace(/\/$/, '')}/api/history?${params}`) : null) ||
+        await fetchHistoryDetails(`/api/history?${params}`);
 
-      let response: Response | null = null;
-      try {
-        response = await fetch(endpoint, {
-          method: 'GET',
-          headers: { 'Accept': 'application/json' }
-        });
-      } catch (directErr) {
-        console.warn('[HistoryTab] Direct fetch failed, trying proxy endpoint:', directErr);
-      }
-
-      if (!response || !response.ok) {
-        try {
-          const proxyUrl = `/api/log-analysis?p_analysis_code=${encodeURIComponent(analysisCode)}${preferredBackendUrl ? `&backend_url=${encodeURIComponent(preferredBackendUrl)}` : ''}`;
-          response = await fetch(proxyUrl, {
-            method: 'GET',
-            headers: { 
-              'Accept': 'application/json',
-              ...(preferredBackendUrl ? { 'x-backend-url': preferredBackendUrl } : {})
-            }
-          });
-        } catch (proxyErr) {
-          console.error('[HistoryTab] Proxy fetch failed:', proxyErr);
-        }
-      }
-
-      if (response && response.ok) {
-        const data = await response.json();
-        console.log(`[HistoryTab] Received /api/log-analysis response for ${analysisCode}:`, data);
+      if (data) {
+        console.log(`[HistoryTab] Received history details for ${analysisCode}:`, data);
 
         const extracted = extractAnalysisResponse(data);
 
@@ -555,10 +566,10 @@ export default function HistoryTab({
           setAnalysisHistory(updated);
         }
       } else {
-        console.warn(`[HistoryTab] /api/log-analysis returned HTTP ${response?.status}`);
+        console.warn(`[HistoryTab] No history details found for ${analysisCode}`);
       }
     } catch (err) {
-      console.error(`[HistoryTab] Error calling /api/log-analysis for ${analysisCode}:`, err);
+      console.error(`[HistoryTab] Error fetching history details for ${analysisCode}:`, err);
     } finally {
       setFetchingAnalysisCode(null);
     }
@@ -575,20 +586,30 @@ export default function HistoryTab({
     // Toggle item expansion
     toggleExpand(item, displayCode);
 
-    // Call /api/log-analysis passing analysis_code starting with ANL- as a parameter
-    fetchLogAnalysis(analysisCode, item);
+    // Fetch full details passing analysis_code starting with ANL- as a parameter
+    fetchAnalysisDetails(analysisCode, item);
   };
 
+  const historyRequestRef = useRef<AbortController | null>(null);
+  const historyQuery = useMemo(() => buildHistoryQuery(activeChips), [activeChips]);
+
   const fetchHistoryFromApi = async () => {
+    // A newer filter replaces any request still in flight
+    historyRequestRef.current?.abort();
+    const request = new AbortController();
+    historyRequestRef.current = request;
+
     setIsLoading(true);
     setError(null);
     try {
-      const endpoint = preferredBackendUrl 
-        ? `${preferredBackendUrl.replace(/\/$/, '')}/api/list-history` 
-        : '/api/list-history';
+      const baseUrl = preferredBackendUrl 
+        ? `${preferredBackendUrl.replace(/\/$/, '')}/api/history` 
+        : '/api/history';
+      const endpoint = historyQuery ? `${baseUrl}?${historyQuery}` : baseUrl;
       
       const response = await fetch(endpoint, {
-        headers: { 'Accept': 'application/json' }
+        headers: { 'Accept': 'application/json' },
+        signal: request.signal
       });
 
       if (!response.ok) {
@@ -614,10 +635,15 @@ export default function HistoryTab({
         });
       });
 
+      const contentTerms = activeChips
+        .filter(c => c.key === 'logs' || c.key === 'search')
+        .map(c => c.value.toLowerCase().trim());
+
       analysisHistory.forEach((localItem, idx) => {
         const safeCode = formatAnalysisCode(localItem.analysis_code, localItem.id, idx);
         const key = localItem.id || safeCode || Math.random().toString();
-        if (!mergedMap.has(key)) {
+        const localContent = `${localItem.input || ''} ${localItem.output || ''}`.toLowerCase();
+        if (!mergedMap.has(key) && contentTerms.every(term => localContent.includes(term))) {
           mergedMap.set(key, {
             id: localItem.id,
             analysis_code: safeCode,
@@ -635,7 +661,8 @@ export default function HistoryTab({
       const finalItems = Array.from(mergedMap.values());
       setHistoryList(finalItems);
     } catch (err) {
-      console.error('Error fetching list-history:', err);
+      if (request.signal.aborted) return;
+      console.error('Error fetching history:', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch analysis history');
       
       // Fallback to prop history if API call fails
@@ -646,13 +673,15 @@ export default function HistoryTab({
         })));
       }
     } finally {
-      setIsLoading(false);
+      if (historyRequestRef.current === request) {
+        setIsLoading(false);
+      }
     }
   };
 
   useEffect(() => {
     fetchHistoryFromApi();
-  }, [preferredBackendUrl]);
+  }, [preferredBackendUrl, historyQuery]);
 
   // Reset page to 1 when search or filters change
   useEffect(() => {
@@ -816,23 +845,19 @@ export default function HistoryTab({
     }
   };
 
-  // Filtered history records matching ALL active chips + pending input
+  // Filters what the backend query cannot express. Log and free-text chips are matched by the
+  // backend, because the list response does not include log content.
   const filteredHistory = useMemo(() => {
     return historyList.filter(item => {
       const id = (item.id || '').toLowerCase();
       const code = (item.analysis_code || '').toLowerCase();
       const model = (item.engine_llm_model || '').toLowerCase();
       const status = resolveValidStatus(item.status, 'COMPLETED').toLowerCase();
-      const input = (item.input_text || item.input || '').toLowerCase();
-      const output = (item.output || '').toLowerCase();
-      const createdAt = (item.created_at || item.timestamp || '').toLowerCase();
 
       // Group active chips by parameter category
       const statusChips = activeChips.filter(c => c.key === 'status');
       const modelChips = activeChips.filter(c => c.key === 'model');
       const idChips = activeChips.filter(c => c.key === 'id');
-      const logsChips = activeChips.filter(c => c.key === 'logs');
-      const searchChips = activeChips.filter(c => c.key === 'search');
 
       // 1. Status check (OR match among status chips)
       if (statusChips.length > 0) {
@@ -855,33 +880,7 @@ export default function HistoryTab({
         if (!matchesId) return false;
       }
 
-      // 4. Logs check (AND match among log chips)
-      if (logsChips.length > 0) {
-        const matchesLogs = logsChips.every(c => {
-          const val = c.value.toLowerCase().trim();
-          return input.includes(val) || output.includes(val);
-        });
-        if (!matchesLogs) return false;
-      }
-
-      // 5. Free Search check (AND match among general search chips)
-      if (searchChips.length > 0) {
-        const matchesSearch = searchChips.every(c => {
-          const val = c.value.toLowerCase().trim();
-          return (
-            id.includes(val) ||
-            code.includes(val) ||
-            model.includes(val) ||
-            status.includes(val) ||
-            input.includes(val) ||
-            output.includes(val) ||
-            createdAt.includes(val)
-          );
-        });
-        if (!matchesSearch) return false;
-      }
-
-      // 6. Active typing live filter (if user is currently typing in input box)
+      // 4. Active typing live filter (if user is currently typing in input box)
       const pendingVal = currentInputValue.toLowerCase().trim();
       if (pendingVal) {
         if (selectedPendingKey === 'status') {
@@ -890,9 +889,7 @@ export default function HistoryTab({
           if (!model.includes(pendingVal)) return false;
         } else if (selectedPendingKey === 'id') {
           if (!id.includes(pendingVal) && !code.includes(pendingVal)) return false;
-        } else if (selectedPendingKey === 'logs') {
-          if (!input.includes(pendingVal) && !output.includes(pendingVal)) return false;
-        } else {
+        } else if (selectedPendingKey !== 'logs') {
           // If typed text contains key:value prefixes, parse temporarily to filter live
           if (pendingVal.includes(':') || pendingVal.includes('=')) {
             const tempParsed = parseMultiParameters(pendingVal, null);
@@ -901,29 +898,7 @@ export default function HistoryTab({
               if (p.key === 'status' && status !== pVal) return false;
               if (p.key === 'model' && !model.includes(pVal)) return false;
               if (p.key === 'id' && !id.includes(pVal) && !code.includes(pVal)) return false;
-              if (p.key === 'logs' && !input.includes(pVal) && !output.includes(pVal)) return false;
-              if (p.key === 'search') {
-                const matchesAny =
-                  id.includes(pVal) ||
-                  code.includes(pVal) ||
-                  model.includes(pVal) ||
-                  status.includes(pVal) ||
-                  input.includes(pVal) ||
-                  output.includes(pVal) ||
-                  createdAt.includes(pVal);
-                if (!matchesAny) return false;
-              }
             }
-          } else {
-            const matchesAny =
-              id.includes(pendingVal) ||
-              code.includes(pendingVal) ||
-              model.includes(pendingVal) ||
-              status.includes(pendingVal) ||
-              input.includes(pendingVal) ||
-              output.includes(pendingVal) ||
-              createdAt.includes(pendingVal);
-            if (!matchesAny) return false;
           }
         }
       }
@@ -1299,7 +1274,7 @@ export default function HistoryTab({
               (item.analysis_code && activeExpandedId === item.analysis_code) ||
               (item.id && activeExpandedId === String(item.id));
 
-            // Lookup extracted detail from /api/log-analysis response
+            // Lookup extracted detail from /api/history details response
             const itemDetail = 
               (item.id && detailsMap[String(item.id)]) ||
               (item.analysis_code && detailsMap[String(item.analysis_code)]) ||
@@ -1364,7 +1339,7 @@ export default function HistoryTab({
                         {isItemFetching && (
                           <span className="px-2 py-0.5 bg-blue-50 text-blue-600 rounded text-[9px] font-bold border border-blue-200 flex items-center gap-1 animate-pulse">
                             <Loader2 size={10} className="animate-spin text-blue-600" />
-                            Fetching /api/log-analysis...
+                            Fetching /api/history...
                           </span>
                         )}
                       </div>
@@ -1430,7 +1405,7 @@ export default function HistoryTab({
                           {isItemFetching && !displayInput ? (
                             <div className="w-full h-80 bg-slate-50 border border-slate-200 rounded-xl p-6 flex flex-col items-center justify-center gap-2 text-slate-400">
                               <Loader2 size={20} className="animate-spin text-blue-500" />
-                              <span className="text-xs font-mono text-slate-600">Retrieving raw input from /api/log-analysis...</span>
+                              <span className="text-xs font-mono text-slate-600">Retrieving raw input from /api/history...</span>
                             </div>
                           ) : (
                             <textarea
@@ -1485,7 +1460,7 @@ export default function HistoryTab({
                           {isItemFetching && !displayOutput ? (
                             <div className="w-full h-80 bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-col items-center justify-center gap-2 text-slate-400">
                               <Loader2 size={20} className="animate-spin text-blue-400" />
-                              <span className="text-xs font-mono text-blue-200">Retrieving intelligence analysis from /api/log-analysis...</span>
+                              <span className="text-xs font-mono text-blue-200">Retrieving intelligence analysis from /api/history...</span>
                             </div>
                           ) : isRawView ? (
                             <textarea

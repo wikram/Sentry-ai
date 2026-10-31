@@ -1,0 +1,46 @@
+<configuration>
+  <sources></sources>
+  <agents>
+    <agent>
+      <id>agent-1784546828166-kfe3s5o3a</id>
+      <name>jkjbkjb</name>
+      <role>Specialized SRE Bot</role>
+      <avatar>Cpu</avatar>
+      <status>idle</status>
+      <isActive>true</isActive>
+      <backendUrl>http://192.168.1.143:8000</backendUrl>
+      <model>ai21/jamba-large-1.7</model>
+      <apiKey>sk-prj-xxxxxxxxxx</apiKey>
+      <isDefault>false</isDefault>
+      <findings></findings>
+    </agent>
+    <agent>
+      <id>agent-1784548218958-ghqbdhyws</id>
+      <name>kkljklj</name>
+      <role>Specialized SRE Bot</role>
+      <avatar>Cpu</avatar>
+      <status>idle</status>
+      <isActive>false</isActive>
+      <backendUrl>http://192.168.1.143:8000</backendUrl>
+      <model>ai21/jamba-large-1.7</model>
+      <apiKey>sk-prj-xxxxxxxxxx</apiKey>
+      <isDefault>false</isDefault>
+      <findings></findings>
+    </agent>
+    <agent>
+      <id>agent-1784548582428-jcte0ymzx</id>
+      <name>klknlknkln</name>
+      <role>Specialized SRE Bot</role>
+      <avatar>Cpu</avatar>
+      <status>idle</status>
+      <isActive>false</isActive>
+      <backendUrl>http://192.168.1.143:8000</backendUrl>
+      <model>aion-labs/aion-3.0-mini</model>
+      <apiKey>sk-prj-xxxxxxxxxx</apiKey>
+      <isDefault>false</isDefault>
+      <findings></findings>
+    </agent>
+  </agents>
+  <selectedModel></selectedModel>
+  <apiBackendUrl></apiBackendUrl>
+</configuration>

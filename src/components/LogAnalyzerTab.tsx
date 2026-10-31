@@ -93,7 +93,7 @@ export default function LogAnalyzerTab({
                 <input 
                   type="file" 
                   className="hidden" 
-                  accept=".txt,.log,text/*"
+                  accept=".log,.txt,.json,.csv,text/*"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file) {

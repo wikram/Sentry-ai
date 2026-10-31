@@ -147,6 +147,22 @@ const INITIAL_ROLES: CustomRole[] = [
   }
 ];
 
+// Returns the message to show when the request fails, or null when it succeeds
+const postUserRequest = async (url: string, body: object): Promise<string | null> => {
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.status !== 'error') return null;
+    return data.message || (typeof data.detail === 'string' && data.detail) || `Request failed with status ${res.status}`;
+  } catch {
+    return 'Could not reach the server.';
+  }
+};
+
 const INITIAL_USERS: ManagedUser[] = [
   {
     id: 'usr-1',
@@ -383,6 +399,8 @@ export default function SettingsTab({
   const [formFullName, setFormFullName] = useState('');
   const [formRole, setFormRole] = useState<ManagedUser['role']>('DevOps Developer');
   const [formPassword, setFormPassword] = useState('');
+  const [formConfirmPassword, setFormConfirmPassword] = useState('');
+  const [isSavingUser, setIsSavingUser] = useState(false);
   const [formStatus, setFormStatus] = useState<'Active' | 'Inactive'>('Active');
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -397,6 +415,7 @@ export default function SettingsTab({
     setFormFullName('');
     setFormRole('DevOps Developer');
     setFormPassword('');
+    setFormConfirmPassword('');
     setFormStatus('Active');
     setFormError(null);
     setEditingUserId(null);
@@ -411,11 +430,12 @@ export default function SettingsTab({
     setFormRole(u.role);
     setFormStatus(u.status);
     setFormPassword('');
+    setFormConfirmPassword('');
     setFormError(null);
     setIsAddUserOpen(true);
   };
 
-  const handleSaveUser = (e: React.FormEvent) => {
+  const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
 
@@ -427,9 +447,33 @@ export default function SettingsTab({
       setFormError('Valid email address is required.');
       return;
     }
+    if (!editingUserId && !formPassword) {
+      setFormError('Password is required.');
+      return;
+    }
+    if (formPassword && formPassword.length < 6) {
+      setFormError('Password must be at least 6 characters long.');
+      return;
+    }
+    if (formPassword !== formConfirmPassword) {
+      setFormError('Password and confirm password do not match.');
+      return;
+    }
 
     if (editingUserId) {
       // Edit mode
+      if (formPassword) {
+        setIsSavingUser(true);
+        const error = await postUserRequest('/api/change-password', {
+          username: users.find(u => u.id === editingUserId)?.username,
+          newPassword: formPassword
+        });
+        setIsSavingUser(false);
+        if (error) {
+          setFormError(error);
+          return;
+        }
+      }
       setUsers(prev => prev.map(u => {
         if (u.id === editingUserId) {
           return {
@@ -449,6 +493,18 @@ export default function SettingsTab({
         setFormError('A user with this username already exists.');
         return;
       }
+      setIsSavingUser(true);
+      const error = await postUserRequest('/api/users', {
+        name: formFullName.trim() || formUsername.trim(),
+        username: formUsername.trim(),
+        password: formPassword,
+        role: formRole
+      });
+      setIsSavingUser(false);
+      if (error) {
+        setFormError(error);
+        return;
+      }
       const newUser: ManagedUser = {
         id: 'usr-' + Date.now(),
         username: formUsername.trim(),
@@ -462,6 +518,8 @@ export default function SettingsTab({
       setUsers(prev => [newUser, ...prev]);
     }
 
+    setFormPassword('');
+    setFormConfirmPassword('');
     setIsAddUserOpen(false);
   };
 
@@ -477,10 +535,18 @@ export default function SettingsTab({
     }
   };
 
-  const handleResetPassword = (e: React.FormEvent) => {
+  const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPassInput || newPassInput.length < 6) {
       alert('Password must be at least 6 characters long.');
+      return;
+    }
+    const error = await postUserRequest('/api/change-password', {
+      username: users.find(u => u.id === resetPassUserId)?.username,
+      newPassword: newPassInput
+    });
+    if (error) {
+      alert(error);
       return;
     }
     setPassSuccessMsg('Password successfully reset for user.');
@@ -1159,7 +1225,7 @@ export default function SettingsTab({
                   <h2 className="text-base font-bold text-slate-800">
                     {editingUserId ? 'Edit User Credentials' : 'Create New Devops Studio User'}
                   </h2>
-                  <p className="text-xs text-slate-400">Configure username, email, and security role</p>
+                  <p className="text-xs text-slate-400">Configure username, email, password, and security role</p>
                 </div>
               </div>
               <button 
@@ -1215,6 +1281,32 @@ export default function SettingsTab({
               </div>
 
               <div>
+                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 block mb-1">{editingUserId ? 'New Password' : 'Password *'}</label>
+                <input 
+                  type="password" 
+                  value={formPassword}
+                  onChange={(e) => setFormPassword(e.target.value)}
+                  placeholder={editingUserId ? 'Leave blank to keep current password' : 'Enter password (min 6 chars)'}
+                  autoComplete="new-password"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  required={!editingUserId}
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 block mb-1">{editingUserId ? 'Confirm New Password' : 'Confirm Password *'}</label>
+                <input 
+                  type="password" 
+                  value={formConfirmPassword}
+                  onChange={(e) => setFormConfirmPassword(e.target.value)}
+                  placeholder="Re-enter password"
+                  autoComplete="new-password"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  required={!editingUserId}
+                />
+              </div>
+
+              <div>
                 <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400 block mb-1">Role & Permissions</label>
                 <select
                   value={formRole}
@@ -1263,10 +1355,11 @@ export default function SettingsTab({
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 transition-all flex items-center justify-center gap-2"
+                  disabled={isSavingUser}
+                  className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-500/20 transition-all flex items-center justify-center gap-2"
                 >
                   <Check size={14} />
-                  <span>{editingUserId ? 'Save Changes' : 'Create User'}</span>
+                  <span>{isSavingUser ? 'Saving...' : editingUserId ? 'Save Changes' : 'Create User'}</span>
                 </button>
               </div>
             </form>

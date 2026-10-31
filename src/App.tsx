@@ -78,6 +78,41 @@ import { NavItem, SubNavItem } from './components/Common';
 // Provision to configure backend system URL via environment variable
 const CONFIGURED_BACKEND_URL = (import.meta as any).env?.VITE_BACKEND_URL || "";
 
+const sortModels = (models: any[]) => [...models].sort((a: any, b: any) => {
+  const nameA = a.name || a.id || '';
+  const nameB = b.name || b.id || '';
+  return nameA.localeCompare(nameB);
+});
+
+// Fetch supported models via backend or direct OpenRouter API fallback
+const fetchSupportedModels = async () => {
+  let fetchedModelsList: any[] = [];
+  try {
+    const modelsRes = await fetch('/api/models');
+    if (modelsRes.ok) {
+      const modelsData = await modelsRes.json();
+      fetchedModelsList = modelsData.data || (Array.isArray(modelsData) ? modelsData : []);
+    }
+  } catch (e) {
+    console.warn('/api/models endpoint unavailable, trying direct OpenRouter fetch...');
+  }
+
+  // A list of only local models means the server could not reach OpenRouter, but the browser may
+  if (fetchedModelsList.every(model => String(model.id).startsWith('local/'))) {
+    try {
+      const directRes = await fetch('https://openrouter.ai/api/v1/models');
+      if (directRes.ok) {
+        const directData = await directRes.json();
+        fetchedModelsList = [...fetchedModelsList, ...(directData.data || (Array.isArray(directData) ? directData : []))];
+      }
+    } catch (e) {
+      console.error('Direct OpenRouter models fetch failed:', e);
+    }
+  }
+
+  return sortModels(fetchedModelsList);
+};
+
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
     return localStorage.getItem('sentry_is_authenticated') === 'true';
@@ -164,11 +199,11 @@ export default function App() {
       is_active: targetAgent.isActive !== false
     };
 
-    console.log('[handleSetDefaultAgent] Calling /api/updateagent with payload:', payload);
+    console.log('[handleSetDefaultAgent] Calling PUT /api/agents with payload:', payload);
 
     try {
-      const response = await fetch('/api/updateagent', {
-        method: 'POST',
+      const response = await fetch('/api/agents', {
+        method: 'PUT',
         headers: {
           'Content-Type': 'application/json'
         },
@@ -182,15 +217,15 @@ export default function App() {
         return;
       }
 
-      console.log('[handleSetDefaultAgent] Successfully updated agent to primary. Executing GET /api/llm-model...');
+      console.log('[handleSetDefaultAgent] Successfully updated agent to primary. Executing GET /api/llm...');
       
-      const modelResponse = await fetch('/api/llm-model');
+      const modelResponse = await fetch('/api/llm');
       if (modelResponse.ok) {
         const modelData = await modelResponse.json();
-        console.log('[handleSetDefaultAgent] GET /api/llm-model response:', modelData);
+        console.log('[handleSetDefaultAgent] GET /api/llm response:', modelData);
         processLlmModelResponse(modelData);
       } else {
-        console.error('[handleSetDefaultAgent] GET /api/llm-model call failed with status:', modelResponse.status);
+        console.error('[handleSetDefaultAgent] GET /api/llm call failed with status:', modelResponse.status);
       }
 
       // Update local state if successful
@@ -268,7 +303,9 @@ export default function App() {
     
     // Check if the configured backend URL is a valid http/https endpoint
     const isValidExternalBackend = rawBackend && (rawBackend.startsWith('http://') || rawBackend.startsWith('https://'));
-    const preferredBackend = isValidExternalBackend ? rawBackend.replace(/\/$/, '') : '';
+    const activeModel = defaultAgent?.model || selectedModel || 'google/gemini-2.5-flash';
+    // Local models are registered on this server, so an external backend cannot run them
+    const preferredBackend = isValidExternalBackend && !activeModel.startsWith('local/') ? rawBackend.replace(/\/$/, '') : '';
 
     setIsAnalyzing(true);
     setAnalysisResult('Initializing autonomous analysis engine...');
@@ -281,7 +318,6 @@ export default function App() {
 
       let report = '';
 
-      const activeModel = defaultAgent?.model || selectedModel || 'google/gemini-2.5-flash';
       const activeApiKey = defaultAgent?.apiKey || '';
       const analysisId = `ANL-${Date.now()}`;
       const analysisTimestamp = new Date().toISOString();
@@ -295,13 +331,17 @@ export default function App() {
         formData.append('user', currentUsername);
         formData.append('file', selectedFile);
         formData.append('description', description || "Analysis request");
-        if (activeModel) formData.append('model', activeModel);
-        if (activeApiKey) formData.append('apiKey', activeApiKey);
+        if (activeModel) formData.append('model_name', activeModel);
+        // The agent key is only for this server's own LLM calls, not the external backend
+        if (activeApiKey && !preferredBackend) formData.append('apiKey', activeApiKey);
 
-        const targetUrl = preferredBackend ? `${preferredBackend}/api/analyze-file` : '/api/analyze-file';
+        const targetUrl = preferredBackend ? `${preferredBackend}/api/analyze` : '/api/analyze';
         const response = await fetch(targetUrl, { method: 'POST', body: formData });
         
-        if (!response.ok) throw new Error(`File analysis failed: ${response.status}`);
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => null);
+          throw new Error(errorData?.error || `File analysis failed: ${response.status}`);
+        }
         
         const text = await response.text();
         try {
@@ -319,18 +359,22 @@ export default function App() {
           user: currentUsername,
           logs: logStream, 
           description: description || "System log analysis request",
-          model: activeModel,
-          apiKey: activeApiKey
+          model_name: activeModel
         };
+        // The agent key is only for this server's own LLM calls, not the external backend
+        const localPayload = { ...payload, apiKey: activeApiKey };
         
         try {
           const res = await fetch(targetUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(preferredBackend ? payload : localPayload)
           });
           
-          if (!res.ok) throw new Error(`Analysis request failed: ${res.status}`);
+          if (!res.ok) {
+            const errorData = await res.json().catch(() => null);
+            throw new Error(errorData?.error || `Analysis request failed: ${res.status}`);
+          }
           
           const text = await res.text();
           try {
@@ -350,7 +394,7 @@ export default function App() {
               const res = await fetch('/api/analyze', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(localPayload)
               });
               if (res.ok) {
                 const text = await res.text();
@@ -439,17 +483,17 @@ export default function App() {
 
   const fetchLlmModel = async () => {
     try {
-      console.log('Executing GET /api/llm-model...');
-      const llmModelRes = await fetch('/api/llm-model');
+      console.log('Executing GET /api/llm...');
+      const llmModelRes = await fetch('/api/llm');
       if (llmModelRes.ok) {
         const llmModelData = await llmModelRes.json();
-        console.log('GET /api/llm-model response:', llmModelData);
+        console.log('GET /api/llm response:', llmModelData);
         processLlmModelResponse(llmModelData);
       } else {
-        console.error('GET /api/llm-model failed with status:', llmModelRes.status);
+        console.error('GET /api/llm failed with status:', llmModelRes.status);
       }
     } catch (llmErr) {
-      console.error('Failed to fetch /api/llm-model:', llmErr);
+      console.error('Failed to fetch /api/llm:', llmErr);
     }
   };
 
@@ -469,8 +513,8 @@ export default function App() {
 
       if (cleanPreferred) {
         try {
-          console.log(`[fetchAndSetAgents] Trying direct browser fetch to: ${cleanPreferred}/api/listagents`);
-          const directRes = await fetch(`${cleanPreferred}/api/listagents`, {
+          console.log(`[fetchAndSetAgents] Trying direct browser fetch to: ${cleanPreferred}/api/agents`);
+          const directRes = await fetch(`${cleanPreferred}/api/agents`, {
             headers: { 'Accept': 'application/json, text/plain, */*' }
           });
           if (directRes.ok) {
@@ -489,7 +533,7 @@ export default function App() {
 
       // 2. Fallback to Express backend proxy
       if (!rawData) {
-        const listagentsRes = await fetch('/api/listagents');
+        const listagentsRes = await fetch('/api/agents');
         if (listagentsRes.ok) {
           const text = await listagentsRes.text();
           try {
@@ -509,12 +553,12 @@ export default function App() {
         }
       }
     } catch (err) {
-      console.error('Failed to load agents from /api/listagents:', err);
+      console.error('Failed to load agents from /api/agents:', err);
     } finally {
       setIsFetchingAgents(false);
     }
 
-    // Execute the /api/llm-model GET call
+    // Execute the /api/llm GET call
     await fetchLlmModel();
   };
 
@@ -552,35 +596,7 @@ export default function App() {
           setApiBackendUrl(configData.apiBackendUrl);
         }
 
-        // Fetch supported models via backend or direct OpenRouter API fallback
-        let fetchedModelsList: any[] = [];
-        try {
-          const modelsRes = await fetch('/api/models');
-          if (modelsRes.ok) {
-            const modelsData = await modelsRes.json();
-            fetchedModelsList = modelsData.data || (Array.isArray(modelsData) ? modelsData : []);
-          }
-        } catch (e) {
-          console.warn('/api/models endpoint unavailable, trying direct OpenRouter fetch...');
-        }
-
-        if (fetchedModelsList.length === 0) {
-          try {
-            const directRes = await fetch('https://openrouter.ai/api/v1/models');
-            if (directRes.ok) {
-              const directData = await directRes.json();
-              fetchedModelsList = directData.data || (Array.isArray(directData) ? directData : []);
-            }
-          } catch (e) {
-            console.error('Direct OpenRouter models fetch failed:', e);
-          }
-        }
-
-        const models = fetchedModelsList.sort((a: any, b: any) => {
-          const nameA = a.name || a.id || '';
-          const nameB = b.name || b.id || '';
-          return nameA.localeCompare(nameB);
-        });
+        const models = await fetchSupportedModels();
         setSupportedModels(models);
 
         // If no model was saved in config, use the first available model as fallback
@@ -601,6 +617,10 @@ export default function App() {
 
     init();
   }, []);
+
+  const refreshSupportedModels = async () => {
+    setSupportedModels(await fetchSupportedModels());
+  };
 
   // Fetch agents and active model info when authenticated after login
   useEffect(() => {
@@ -674,6 +694,7 @@ export default function App() {
     if (!agentName) return;
     
     const payload = {
+      action: 'add',
       name: agentName,
       llm_model: agentModel || selectedModel || (supportedModels.length > 0 ? supportedModels[0].id : ''),
       temperature: 0.2,
@@ -684,8 +705,9 @@ export default function App() {
     };
 
     let assignedId = '';
+    let deployed = false;
     try {
-      const response = await fetch('/api/addagent', {
+      const response = await fetch('/api/agents', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -699,6 +721,7 @@ export default function App() {
       const data = await response.json();
       console.log('Agent deployment succeeded:', data);
       assignedId = String(data.agent?.id || data.id || '');
+      deployed = true;
       alert(`Agent "${agentName}" successfully deployed to the backend system!`);
     } catch (err) {
       console.error('Failed to register agent with API:', err);
@@ -737,16 +760,21 @@ export default function App() {
       }
       return [...updated, newAgent];
     });
+
+    // The backend assigns the real ID, and later updates must target that ID
+    if (deployed && CONFIGURED_BACKEND_URL) {
+      await fetchAndSetAgents();
+    }
     
     if (agentIsPrimary) {
       try {
-        const llmModelRes = await fetch('/api/llm-model');
+        const llmModelRes = await fetch('/api/llm');
         if (llmModelRes.ok) {
           const llmModelData = await llmModelRes.json();
           processLlmModelResponse(llmModelData);
         }
       } catch (llmErr) {
-        console.error('Failed to fetch /api/llm-model after adding primary agent:', llmErr);
+        console.error('Failed to fetch /api/llm after adding primary agent:', llmErr);
       }
     }
 
@@ -776,26 +804,20 @@ export default function App() {
     console.log('[deleteAgent] Found target agent:', targetAgent, 'using name:', agentName);
 
     try {
-      console.log('[deleteAgent] Calling POST /api/deleteagent with:', { agent_id: idStr, name: agentName });
-      const response = await fetch('/api/deleteagent', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          agent_id: idStr,
-          name: agentName
-        })
-      });
+      console.log('[deleteAgent] Calling DELETE /api/agents with:', { agent_id: idStr, name: agentName });
+      const response = await fetch(`/api/agents/${encodeURIComponent(idStr)}`, { method: 'DELETE' });
 
       if (!response.ok) {
         const errJson = await response.json().catch(() => ({}));
         console.error('Failed to delete agent from backend:', errJson.error || `Status ${response.status}`);
-      } else {
-        console.log('Successfully deleted agent on backend for ID:', idStr);
+        alert(`Failed to delete agent "${agentName}": ` + (errJson.error || `Status ${response.status}`));
+        return;
       }
+      console.log('Successfully deleted agent on backend for ID:', idStr);
     } catch (err) {
       console.error('Network error deleting agent:', err);
+      alert(`Failed to delete agent "${agentName}": network error`);
+      return;
     }
 
     setAgents(agents.filter(a => String(a.id).trim() !== idStr));
@@ -808,8 +830,8 @@ export default function App() {
     const nextActiveState = !targetAgent.isActive;
 
     try {
-      const response = await fetch('/api/updateagent', {
-        method: 'POST',
+      const response = await fetch('/api/agents', {
+        method: 'PUT',
         headers: {
           'Content-Type': 'application/json'
         },
@@ -842,14 +864,8 @@ export default function App() {
   const handleSaveAgentConfig = async () => {
     if (!configuringAgentId) return;
 
-    // Duplicate check: Verify if the URL is already used by another agent (excluding the one being edited)
-    if (agentBackendUrl && agents.some(a => a.id !== configuringAgentId && a.backendUrl === agentBackendUrl)) {
-      alert('An agent with this Backend URL already exists.');
-      return;
-    }
-
     try {
-      console.log('[handleSaveAgentConfig] Calling POST /api/updateagent with parameters:', {
+      console.log('[handleSaveAgentConfig] Calling PUT /api/agents with parameters:', {
         agent_id: configuringAgentId,
         name: agentName,
         llm_model: agentModel,
@@ -860,8 +876,8 @@ export default function App() {
         is_active: agentIsActive
       });
 
-      const response = await fetch('/api/updateagent', {
-        method: 'POST',
+      const response = await fetch('/api/agents', {
+        method: 'PUT',
         headers: {
           'Content-Type': 'application/json'
         },
@@ -884,16 +900,16 @@ export default function App() {
         return;
       }
 
-      console.log('Successfully updated agent configuration on backend. Fetching /api/llm-model...');
+      console.log('Successfully updated agent configuration on backend. Fetching /api/llm...');
 
       try {
-        const llmModelRes = await fetch('/api/llm-model');
+        const llmModelRes = await fetch('/api/llm');
         if (llmModelRes.ok) {
           const llmModelData = await llmModelRes.json();
           processLlmModelResponse(llmModelData);
         }
       } catch (llmErr) {
-        console.error('Failed to fetch /api/llm-model after updating agent:', llmErr);
+        console.error('Failed to fetch /api/llm after updating agent:', llmErr);
       }
 
       // Update local state
@@ -2310,6 +2326,7 @@ export default function App() {
                 selectedModel={selectedModel}
                 setSelectedModel={setSelectedModel}
                 supportedModels={supportedModels}
+                onModelsChanged={refreshSupportedModels}
               />
             ) : activeTab === 'settings' ? (
               <SettingsTab

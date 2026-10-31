@@ -8,6 +8,8 @@ import multer from 'multer';
 import dotenv from 'dotenv';
 import { createConfigMgmtRouter } from './server/configMgmtRoutes';
 import { startAnsibleGitSyncScheduler } from './server/configMgmtService';
+import { createLocalModelsRouter } from './server/localModelsRoutes';
+import { LocalModelError, chatWithLocalModel, isLocalModelId, listLocalModels } from './server/localModelsService';
 
 dotenv.config();
 
@@ -213,7 +215,7 @@ async function startServer() {
   });
 
   // API Routes
-  app.post('/api/login', async (req, res) => {
+  app.post('/api/auth/login', async (req, res) => {
     const username = req.body.username || req.body.email || '';
     const password = req.body.password || '';
     if (!username || !password) {
@@ -233,8 +235,8 @@ async function startServer() {
     const backendUrl = process.env.VITE_BACKEND_URL;
     if (backendUrl) {
       try {
-        console.log(`Forwarding login to external backend: ${backendUrl}/api/login`, payload);
-        const externalResponse = await fetchWithTimeout(`${backendUrl}/api/login`, {
+        console.log(`Forwarding login to external backend: ${backendUrl}/api/auth/login`);
+        const externalResponse = await fetchWithTimeout(`${backendUrl}/api/auth/login`, {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
@@ -268,7 +270,7 @@ async function startServer() {
             formData.append('ipaddress', clientIp);
             formData.append('user_agent', userAgent);
 
-            const formResponse = await fetchWithTimeout(`${backendUrl}/api/login`, {
+            const formResponse = await fetchWithTimeout(`${backendUrl}/api/auth/login`, {
               method: 'POST',
               headers: { 
                 'Content-Type': 'application/x-www-form-urlencoded',
@@ -319,32 +321,61 @@ async function startServer() {
     }
 
     const backendUrl = process.env.VITE_BACKEND_URL;
-    if (backendUrl) {
-      try {
-        console.log(`Forwarding change-password request to external backend: ${backendUrl}/api/change-password`);
-        const externalResponse = await fetchWithTimeout(`${backendUrl}/api/change-password`, {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
-          body: JSON.stringify({ username, currentPassword, newPassword }),
-          timeout: 10000
-        });
-
-        if (externalResponse.ok) {
-          const data = await externalResponse.json().catch(() => ({ status: 'success' }));
-          return res.json(data);
-        }
-      } catch (err) {
-        console.log('Unable to reach external backend for password change, defaulting to local update.');
-      }
+    if (!backendUrl) {
+      return res.status(503).json({ status: 'error', message: 'No backend is configured, so the password was not changed.' });
     }
 
-    res.json({
-      status: 'success',
-      message: 'Password updated successfully'
-    });
+    try {
+      console.log(`Forwarding change-password request to external backend: ${backendUrl}/api/change-password`);
+      const externalResponse = await fetchWithTimeout(`${backendUrl}/api/change-password`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({ username, currentPassword, newPassword }),
+        timeout: 10000
+      });
+
+      if (externalResponse.status === 404 || externalResponse.status === 405) {
+        return res.status(501).json({ status: 'error', message: 'The backend has no password update endpoint yet, so the password was not changed.' });
+      }
+      const data = await externalResponse.json().catch(() => ({ status: 'success' }));
+      return res.status(externalResponse.status).json(data);
+    } catch (err) {
+      console.log('Unable to reach external backend for password change.');
+      return res.status(503).json({ status: 'error', message: 'Could not reach the backend, so the password was not changed.' });
+    }
+  });
+
+  app.post('/api/users', async (req, res) => {
+    const { name, username, password, role } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ status: 'error', message: 'Username and password are required' });
+    }
+
+    const backendUrl = process.env.VITE_BACKEND_URL;
+    if (!backendUrl) {
+      return res.status(503).json({ status: 'error', message: 'No backend is configured, so the user was not created.' });
+    }
+
+    try {
+      console.log(`Forwarding user creation to external backend: ${backendUrl}/api/users`);
+      const externalResponse = await fetchWithTimeout(`${backendUrl}/api/users`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({ name, username, password, role }),
+        timeout: 10000
+      });
+      const data = await externalResponse.json().catch(() => ({}));
+      return res.status(externalResponse.status).json(data);
+    } catch (err) {
+      console.log('Unable to reach external backend to create user.');
+      return res.status(503).json({ status: 'error', message: 'Could not reach the backend, so the user was not created.' });
+    }
   });
 
   app.get('/api/config', (req, res) => {
@@ -388,13 +419,13 @@ async function startServer() {
     }
   });
 
-  app.get('/api/llm-model', async (req, res) => {
+  app.get('/api/llm', async (req, res) => {
     try {
       const backendUrl = process.env.VITE_BACKEND_URL;
       if (backendUrl) {
-        console.log(`Forwarding GET /api/llm-model to external backend: ${backendUrl}/api/llm-model`);
+        console.log(`Forwarding GET /api/llm to external backend: ${backendUrl}/api/llm`);
         try {
-          const response = await fetchWithTimeout(`${backendUrl}/api/llm-model`, {
+          const response = await fetchWithTimeout(`${backendUrl}/api/llm`, {
             headers: { 'Accept': 'application/json' },
             timeout: 10000
           });
@@ -402,18 +433,18 @@ async function startServer() {
             const contentType = response.headers.get('content-type') || '';
             if (contentType.includes('application/json')) {
               const data = await response.json();
-              console.log('Received JSON from external /api/llm-model:', data);
+              console.log('Received JSON from external /api/llm:', data);
               return res.json(data);
             } else {
               const textData = await response.text();
-              console.log('Received text from external /api/llm-model:', textData);
+              console.log('Received text from external /api/llm:', textData);
               return res.json({ success: true, model: textData.trim() });
             }
           } else {
-            console.log(`External /api/llm-model status: ${response.status}`);
+            console.log(`External /api/llm status: ${response.status}`);
           }
         } catch (fetchErr) {
-          console.log(`Unable to fetch /api/llm-model from external backend (timed out or unreachable).`);
+          console.log(`Unable to fetch /api/llm from external backend (timed out or unreachable).`);
         }
       }
 
@@ -439,7 +470,7 @@ async function startServer() {
             }
           }
         } catch (e) {
-          console.error('Error parsing config.xml in /api/llm-model:', e);
+          console.error('Error parsing config.xml in /api/llm:', e);
         }
       }
 
@@ -449,13 +480,17 @@ async function startServer() {
 
       res.json({ success: true, model: selectedModel });
     } catch (error) {
-      console.error('Error in /api/llm-model:', error);
+      console.error('Error in /api/llm:', error);
       res.status(500).json({ error: 'Failed to retrieve LLM model' });
     }
   });
 
   app.get('/api/models', async (req, res) => {
     try {
+      const localModels = await listLocalModels();
+      // Backends return the list as a bare array, or under `data` or `models`
+      const toModelList = (data: any): any[] => (Array.isArray(data) ? data : data?.data || data?.models || []);
+
       const backendUrl = process.env.VITE_BACKEND_URL;
       if (backendUrl) {
         console.log(`Forwarding GET /api/models to external backend: ${backendUrl}/api/models`);
@@ -465,8 +500,10 @@ async function startServer() {
             timeout: 10000
           });
           if (response.ok) {
-            const data = await response.json();
-            return res.json(data);
+            const remoteModels = toModelList(await response.json());
+            if (remoteModels.length > 0) {
+              return res.json({ data: [...localModels, ...remoteModels] });
+            }
           }
         } catch (fetchErr) {
           console.log(`Unable to fetch /api/models from external backend.`);
@@ -474,10 +511,18 @@ async function startServer() {
       }
 
       // Server fetches supported models from OpenRouter server-side
-      const response = await fetchWithTimeout('https://openrouter.ai/api/v1/models', { timeout: 10000 });
-      if (response.ok) {
-        const data = await response.json();
-        return res.json(data);
+      try {
+        const response = await fetchWithTimeout('https://openrouter.ai/api/v1/models', { timeout: 10000 });
+        if (response.ok) {
+          return res.json({ data: [...localModels, ...toModelList(await response.json())] });
+        }
+      } catch (fetchErr) {
+        console.log(`Unable to fetch /api/models from OpenRouter.`);
+      }
+
+      // Local models stay usable on networks with no internet access
+      if (localModels.length > 0) {
+        return res.json({ data: localModels });
       }
       res.status(500).json({ error: 'Failed to fetch models from OpenRouter' });
     } catch (error) {
@@ -541,14 +586,14 @@ async function startServer() {
     }
   });
 
-  app.get('/api/listagents', async (req, res) => {
+  app.get('/api/agents', async (req, res) => {
     try {
       const backendUrl = process.env.VITE_BACKEND_URL;
       
       if (backendUrl) {
-        console.log(`Fetching agents from configured backend: ${backendUrl}/api/listagents`);
+        console.log(`Fetching agents from configured backend: ${backendUrl}/api/agents`);
         try {
-          const response = await fetchWithTimeout(`${backendUrl}/api/listagents`, {
+          const response = await fetchWithTimeout(`${backendUrl}/api/agents`, {
             headers: { 'Accept': 'application/json, text/plain, */*' },
             timeout: 15000
           });
@@ -1008,14 +1053,18 @@ async function startServer() {
 
       res.json(normalizedAgents);
     } catch (error) {
-      console.error('Error in /api/listagents:', error);
+      console.error('Error in /api/agents:', error);
       res.status(500).json({ error: 'Failed to list agents' });
     }
   });
 
-  app.post('/api/addagent', async (req, res) => {
+  app.post('/api/agents', async (req, res) => {
     try {
-      const { name, llm_model, temperature, conn_url, api_key, is_primary, is_active } = req.body;
+      const { action, agent_id, name, llm_model, temperature, conn_url, api_key, is_primary, is_active } = req.body;
+
+      if (action !== 'add') {
+        return res.status(400).json({ error: 'Unsupported agent action' });
+      }
 
       if (!name) {
         return res.status(400).json({ error: 'Agent name is required' });
@@ -1026,14 +1075,16 @@ async function startServer() {
       let externalErrorMsg = '';
 
       if (backendUrl) {
-        console.log(`Forwarding addagent request to external backend: ${backendUrl}/api/addagent`);
+        console.log(`Forwarding agent add to external backend: POST ${backendUrl}/api/agents`);
         try {
-          const externalResponse = await fetchWithTimeout(`${backendUrl}/api/addagent`, {
+          const externalResponse = await fetchWithTimeout(`${backendUrl}/api/agents`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({
+              action,
+              agent_id,
               name,
               llm_model,
               temperature: temperature !== undefined ? temperature : 0.2,
@@ -1054,7 +1105,7 @@ async function startServer() {
             externalErrorMsg = `External backend response status ${externalResponse.status}`;
           }
         } catch (fetchErr) {
-          console.log('Unable to connect to external backend during addagent.');
+          console.log('Unable to connect to external backend during agent add.');
           externalErrorMsg = `Connection to external backend could not be established.`;
         }
       }
@@ -1160,7 +1211,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/updateagent', async (req, res) => {
+  app.put('/api/agents', async (req, res) => {
     try {
       const { agent_id, name, llm_model, temperature, conn_url, api_key, is_primary, is_active } = req.body;
 
@@ -1173,15 +1224,16 @@ async function startServer() {
       let externalErrorMsg = '';
 
       if (backendUrl) {
-        console.log(`Forwarding updateagent request to external backend: ${backendUrl}/api/updateagent`);
+        console.log(`Forwarding agent update to external backend: PUT ${backendUrl}/api/agents`);
         try {
-          const externalResponse = await fetchWithTimeout(`${backendUrl}/api/updateagent`, {
-            method: 'POST',
+          const externalResponse = await fetchWithTimeout(`${backendUrl}/api/agents`, {
+            method: 'PUT',
             headers: {
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-              agent_id,
+              // The backend requires an integer, agent ids are strings in the UI
+              agent_id: Number.isNaN(Number(agent_id)) ? agent_id : Number(agent_id),
               name,
               llm_model,
               temperature: temperature !== undefined ? temperature : 0.2,
@@ -1198,11 +1250,11 @@ async function startServer() {
             externalSuccess = true;
           } else {
             const errText = await externalResponse.text().catch(() => '');
-            console.log(`External backend updateagent returned status ${externalResponse.status}`);
-            externalErrorMsg = `External backend updateagent status ${externalResponse.status}`;
+            console.log(`External backend PUT /api/agents returned status ${externalResponse.status}`);
+            externalErrorMsg = `External backend PUT /api/agents status ${externalResponse.status}`;
           }
         } catch (fetchErr) {
-          console.log('Unable to connect to external backend during updateagent.');
+          console.log('Unable to connect to external backend during agent update.');
           externalErrorMsg = `Connection to external backend could not be established.`;
         }
       }
@@ -1309,9 +1361,10 @@ async function startServer() {
     }
   });
 
-  app.post('/api/deleteagent', async (req, res) => {
+  // The agent id comes from the URL, or from a JSON body on DELETE /api/agents
+  app.delete(['/api/agents/:agent_id', '/api/agents'], async (req, res) => {
     try {
-      const { agent_id, name } = req.body;
+      const agent_id = req.params.agent_id || req.body?.agent_id;
 
       if (!agent_id) {
         return res.status(400).json({ error: 'Agent ID is required' });
@@ -1322,17 +1375,11 @@ async function startServer() {
       let externalErrorMsg = '';
 
       if (backendUrl) {
-        console.log(`Forwarding deleteagent request to external backend: ${backendUrl}/api/deleteagent`);
+        const externalUrl = `${backendUrl}/api/agents/${encodeURIComponent(agent_id)}`;
+        console.log(`Forwarding agent delete to external backend: DELETE ${externalUrl}`);
         try {
-          const externalResponse = await fetchWithTimeout(`${backendUrl}/api/deleteagent`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              agent_id,
-              name
-            }),
+          const externalResponse = await fetchWithTimeout(externalUrl, {
+            method: 'DELETE',
             timeout: 10000
           });
 
@@ -1341,11 +1388,11 @@ async function startServer() {
             externalSuccess = true;
           } else {
             const errText = await externalResponse.text().catch(() => '');
-            console.log(`External backend deleteagent returned status ${externalResponse.status}`);
-            externalErrorMsg = `External backend deleteagent status ${externalResponse.status}`;
+            console.log(`External backend DELETE /api/agents returned status ${externalResponse.status}`);
+            externalErrorMsg = `External backend DELETE /api/agents status ${externalResponse.status}`;
           }
         } catch (fetchErr) {
-          console.log('Unable to connect to external backend during deleteagent.');
+          console.log('Unable to connect to external backend during agent delete.');
           externalErrorMsg = `Connection to external backend could not be established.`;
         }
       }
@@ -1481,6 +1528,24 @@ async function startServer() {
   });
 
 async function callOpenRouterAI(logs: string, description: string, modelOverride?: string, apiKeyOverride?: string, fileNotice?: string) {
+  const prompt = `You are an expert SRE and Log Analysis Agent. 
+Analyze the following system logs ${fileNotice ? `from "${fileNotice}" ` : ''}and provide a concise, high-impact report.
+
+User Context/Instructions: ${description || "General analysis"}
+
+Logs:
+${logs.slice(0, 20000)}
+
+Provide the report in Markdown format. 
+Focus on:
+1. Detected Anomalies/Errors
+2. Potential Root Causes
+3. Recommended Actions`;
+
+  if (isLocalModelId(modelOverride)) {
+    return chatWithLocalModel(modelOverride!, prompt);
+  }
+
   const apiKey = apiKeyOverride || process.env.OPENROUTER_API_KEY || process.env.OPEN_ROUTER_API_KEY || process.env.OPENROUTER_KEY || process.env.GEMINI_API_KEY;
 
   if (!apiKey) {
@@ -1511,19 +1576,7 @@ async function callOpenRouterAI(logs: string, description: string, modelOverride
       messages: [
         {
           role: 'user',
-          content: `You are an expert SRE and Log Analysis Agent. 
-Analyze the following system logs ${fileNotice ? `from "${fileNotice}" ` : ''}and provide a concise, high-impact report.
-
-User Context/Instructions: ${description || "General analysis"}
-
-Logs:
-${logs.slice(0, 20000)}
-
-Provide the report in Markdown format. 
-Focus on:
-1. Detected Anomalies/Errors
-2. Potential Root Causes
-3. Recommended Actions`
+          content: prompt
         }
       ]
     }),
@@ -1768,104 +1821,95 @@ const initialAnalysisHistory: any[] = [
   }
 ];
 
-  app.post('/api/analyze', async (req, res) => {
+  // Accepts a JSON body, or multipart/form-data with a "file" or "logs" field
+  app.post('/api/analyze', upload.single('file'), async (req, res) => {
     try {
-      const { id, timestamp, user, logs, description, model, apiKey } = req.body;
+      const { user, description, apiKey } = req.body;
+      const id = req.body.id || `ANL-${Date.now()}`;
+      const timestamp = req.body.timestamp || new Date().toISOString();
+      const model = req.body.model_name;
+      const file = req.file;
+
+      let logs = req.body.logs;
+      if (file) {
+        logs = fs.readFileSync(file.path, 'utf-8');
+
+        // Basic cleanup: remove the temporary file
+        fs.unlinkSync(file.path);
+      }
 
       if (!logs) {
         return res.status(400).json({ error: 'No logs provided' });
       }
 
-      const report = await callOpenRouterAI(logs, description, model, apiKey);
+      const report = await callOpenRouterAI(logs, description, model, apiKey, file?.originalname);
       
       // Save analysis record to history
       const newRecord = {
         id: `019ff${Math.random().toString(16).substring(2, 10)}-${Math.random().toString(16).substring(2, 6)}-754d-9500-${Math.random().toString(16).substring(2, 12)}`,
-        analysis_code: id || `ANL-${Date.now()}`,
+        analysis_code: id,
         status: "COMPLETED",
-        input_char_count: logs ? logs.length : 100,
+        input_char_count: logs.length,
         engine_llm_model: model || "openai/gpt-4o",
-        created_at: timestamp || new Date().toISOString(),
+        created_at: timestamp,
         completed_at: new Date().toISOString(),
-        input: logs,
+        input: file ? `File: ${file.originalname}\n\n${logs}` : logs,
         output: report,
         user: user || 'admin'
       };
       initialAnalysisHistory.unshift(newRecord);
 
-      res.json({ id: id || `ANL-${Date.now()}`, timestamp: timestamp || new Date().toISOString(), user: user || 'admin', report });
+      res.json({ id, timestamp, user: user || 'admin', report });
     } catch (error) {
       console.error('Analysis failed:', error);
-      res.status(500).json({ error: 'Log analysis engine failed' });
-    }
-  });
-
-  app.post('/api/analyze-file', upload.single('file'), async (req, res) => {
-    try {
-      const id = req.body.id || `ANL-${Date.now()}`;
-      const timestamp = req.body.timestamp || new Date().toISOString();
-      const user = req.body.user || 'admin';
-      const description = req.body.description || "General analysis";
-      const model = req.body.model;
-      const apiKey = req.body.apiKey;
-      const file = req.file;
-
-      if (!file) {
-        return res.status(400).json({ error: 'No file uploaded' });
-      }
-
-      const logs = fs.readFileSync(file.path, 'utf-8');
-      
-      // Basic cleanup: remove the temporary file
-      fs.unlinkSync(file.path);
-
-      const report = await callOpenRouterAI(logs, description, model, apiKey, file.originalname);
-      
-      // Save file analysis record to history
-      const newRecord = {
-        id: `019ff${Math.random().toString(16).substring(2, 10)}-${Math.random().toString(16).substring(2, 6)}-754d-9500-${Math.random().toString(16).substring(2, 12)}`,
-        analysis_code: id,
-        status: "COMPLETED",
-        input_char_count: logs ? logs.length : 100,
-        engine_llm_model: model || "openai/gpt-4o",
-        created_at: timestamp,
-        completed_at: new Date().toISOString(),
-        input: `File: ${file.originalname}\n\n${logs}`,
-        output: report,
-        user
-      };
-      initialAnalysisHistory.unshift(newRecord);
-
-      res.json({ id, timestamp, user, report });
-    } catch (error) {
-      console.error('File analysis failed:', error);
-      res.status(500).json({ error: 'Log analysis engine (file mode) failed' });
+      res.status(500).json({ error: error instanceof LocalModelError ? error.message : 'Log analysis engine failed' });
     }
   });
 
   const handleListHistory = async (req: express.Request, res: express.Response) => {
     try {
+      const queryParam = (...names: string[]) =>
+        String(names.map(name => req.query[name]).find(Boolean) || '').trim().toLowerCase();
+      const analysisCode = queryParam('analysis_code');
+
       const backendUrl = process.env.VITE_BACKEND_URL;
       if (backendUrl) {
-        console.log(`Forwarding GET /api/list-history to external backend: ${backendUrl}/api/list-history`);
+        const query = req.originalUrl.split('?')[1];
+        const targetUrl = `${backendUrl}/api/history${query ? `?${query}` : ''}`;
+        console.log(`Forwarding GET /api/history to external backend: ${targetUrl}`);
         try {
-          const response = await fetchWithTimeout(`${backendUrl}/api/list-history`, {
+          const response = await fetchWithTimeout(targetUrl, {
             headers: { 'Accept': 'application/json' },
             timeout: 10000
           });
           if (response.ok) {
             const data = await response.json();
-            return res.json(data);
+            // Runs on local models exist only in this server's history
+            if (!analysisCode || data?.history?.length > 0) {
+              return res.json(data);
+            }
           }
         } catch (fetchErr) {
-          console.log(`Unable to fetch /api/list-history from external backend, returning local history.`);
+          console.log(`Unable to fetch /api/history from external backend, returning local history.`);
         }
       }
+
+      const status = queryParam('status', 'p_status');
+      const model = queryParam('model_name', 'p_model_name');
+      const contentTerms = queryParam('content_query', 'p_content_query').split(/\s+/).filter(Boolean);
+
+      const history = initialAnalysisHistory.filter(item => {
+        if (status && String(item.status).toLowerCase() !== status) return false;
+        if (model && !String(item.engine_llm_model).toLowerCase().includes(model)) return false;
+        if (analysisCode && String(item.analysis_code).toLowerCase() !== analysisCode) return false;
+        const content = `${item.input || ''} ${item.output || ''}`.toLowerCase();
+        return contentTerms.every(term => content.includes(term));
+      });
 
       return res.json({
         status: "success",
         message: "Analysis history fetched successfully",
-        history: initialAnalysisHistory
+        history
       });
     } catch (error) {
       console.error('Error fetching list history:', error);
@@ -1873,177 +1917,14 @@ const initialAnalysisHistory: any[] = [
     }
   };
 
-  app.get('/api/list-history', handleListHistory);
-  app.post('/api/list-history', handleListHistory);
-
-  const handleLogAnalysis = async (req: express.Request, res: express.Response) => {
-    try {
-      const analysisCode = String(
-        req.query.p_analysis_code ||
-        req.query.analysis_code || 
-        req.query.code || 
-        req.query.id || 
-        req.body?.p_analysis_code ||
-        req.body?.analysis_code || 
-        req.body?.code || 
-        req.body?.id || 
-        ''
-      ).trim();
-
-      const passedBackendUrl = String(req.query.backend_url || req.headers['x-backend-url'] || '').trim();
-      const backendUrl = passedBackendUrl || process.env.VITE_BACKEND_URL;
-
-      console.log(`[API] /api/log-analysis called with parameter p_analysis_code / analysis_code: "${analysisCode}" (Method: ${req.method})`);
-
-      if (backendUrl) {
-        console.log(`Forwarding /api/log-analysis to external backend: ${backendUrl}/api/log-analysis?p_analysis_code=${encodeURIComponent(analysisCode)}`);
-        try {
-          const targetUrl = `${backendUrl.replace(/\/$/, '')}/api/log-analysis?p_analysis_code=${encodeURIComponent(analysisCode)}&analysis_code=${encodeURIComponent(analysisCode)}&code=${encodeURIComponent(analysisCode)}`;
-          const response = await fetchWithTimeout(targetUrl, {
-            method: req.method === 'POST' ? 'POST' : 'GET',
-            headers: { 
-              'Accept': 'application/json',
-              'Content-Type': 'application/json'
-            },
-            body: req.method === 'POST' ? JSON.stringify({ p_analysis_code: analysisCode, analysis_code: analysisCode, code: analysisCode }) : undefined,
-            timeout: 5000
-          });
-
-          if (response.ok) {
-            const data = await response.json();
-            console.log(`Received /api/log-analysis response from external backend for "${analysisCode}"`);
-            return res.json(data);
-          } else {
-            console.log(`External backend /api/log-analysis status: ${response.status}`);
-          }
-        } catch (fetchErr) {
-          console.log(`Unable to fetch /api/log-analysis from external backend, serving from local history.`);
-        }
-      }
-
-      // Local fallback in initialAnalysisHistory
-      const cleanCode = analysisCode.trim();
-      const numPart = cleanCode.replace(/^ANL-/, '');
-      const record = initialAnalysisHistory.find((item, index) => {
-        const itemCode = String(item.analysis_code || '').trim();
-        const itemId = String(item.id || '').trim();
-        const itemNumPart = itemCode.replace(/^ANL-/, '');
-        return itemCode === cleanCode || 
-               itemId === cleanCode ||
-               itemCode.toLowerCase() === cleanCode.toLowerCase() ||
-               (numPart && itemNumPart === numPart) ||
-               (numPart && (numPart === String(index + 1) || numPart === String(index))) ||
-               (`ANL-${itemId}` === cleanCode) ||
-               (`ANL-${index + 1}` === cleanCode) ||
-               (cleanCode.startsWith('ANL-') && itemCode === cleanCode);
-      }) || (initialAnalysisHistory.length > 0 ? initialAnalysisHistory[0] : null);
-
-      if (record) {
-        const inputText = record.input || "No input logs recorded.";
-        const outputText = record.output || "No intelligence analysis report available.";
-        return res.json({
-          status: "success",
-          message: "Analysis history fetched successfully",
-          analysis_code: record.analysis_code || cleanCode,
-          input: inputText,
-          input_text: inputText,
-          output: outputText,
-          history: [
-            {
-              input_text: inputText,
-              error_message: null,
-              classified_entries: null,
-              remediations: [
-                {
-                  id: `rem-${Date.now()}`,
-                  entry_id: null,
-                  fix_steps: [
-                    "1. Investigate the applications or pods with excessive resource consumption.",
-                    "2. Check node capacity and pod resource limits.",
-                    "3. Scale application replicas or increase resource constraints as required.",
-                    "4. Monitor metrics to confirm resolution."
-                  ],
-                  confidence: 0.95,
-                  root_cause: outputText.length > 50 ? outputText.slice(0, 180) + '...' : outputText,
-                  analysis_id: record.analysis_code || cleanCode,
-                  sequence_no: 1
-                }
-              ]
-            }
-          ],
-          record: {
-            ...record,
-            input: inputText,
-            input_text: inputText,
-            output: outputText
-          },
-          data: {
-            ...record,
-            input: inputText,
-            input_text: inputText,
-            output: outputText
-          },
-          ...record
-        });
-      }
-
-      // Return structured response for the requested code
-      const defaultInput = "Openshift cluster Out of Memory";
-      const defaultOutput = `### Analysis Summary for ${cleanCode}\n\nAutomated analysis record retrieved successfully.`;
-      return res.json({
-        status: "success",
-        message: "Analysis history fetched successfully",
-        analysis_code: cleanCode || `ANL-${Date.now()}`,
-        input: defaultInput,
-        input_text: defaultInput,
-        output: defaultOutput,
-        history: [
-          {
-            input_text: defaultInput,
-            error_message: null,
-            classified_entries: null,
-            remediations: [
-              {
-                id: `rem-${Date.now()}`,
-                entry_id: null,
-                fix_steps: [
-                  "1. Identify the nodes in the cluster that are experiencing high memory usage using the command: `oc adm top nodes`.",
-                  "2. Check for any pods consuming excessive memory with: `oc adm top pods --all-namespaces`.",
-                  "3. Investigate the applications running on these pods for memory leaks or inefficient memory usage.",
-                  "4. Increase the memory limits for the affected pods if necessary by editing the resource limits in their deployment configurations.",
-                  "5. Consider scaling the application horizontally by increasing the number of pod replicas.",
-                  "6. If the cluster itself is under-provisioned, add more nodes to the cluster to increase the available memory.",
-                  "7. Monitor the memory usage after changes to ensure the issue is resolved."
-                ],
-                confidence: 0.9,
-                root_cause: "The Openshift cluster is running out of available memory resources, likely due to insufficient memory allocation or a memory leak in one or more applications.",
-                analysis_id: cleanCode || `ANL-${Date.now()}`,
-                sequence_no: 1
-              }
-            ]
-          }
-        ],
-        record: {
-          analysis_code: cleanCode,
-          status: "COMPLETED",
-          created_at: new Date().toISOString(),
-          completed_at: new Date().toISOString(),
-          input: defaultInput,
-          input_text: defaultInput,
-          output: defaultOutput
-        }
-      });
-    } catch (error) {
-      console.error('Error in /api/log-analysis:', error);
-      res.status(500).json({ status: "error", error: 'Failed to retrieve log analysis' });
-    }
-  };
-
-  app.get('/api/log-analysis', handleLogAnalysis);
-  app.post('/api/log-analysis', handleLogAnalysis);
+  app.get('/api/history', handleListHistory);
+  app.post('/api/history', handleListHistory);
 
   // Configuration Management Real Data API
   app.use('/api/config-mgmt', createConfigMgmtRouter());
+
+  // Self-hosted LLM endpoints (Ollama, OpenAI-compatible servers)
+  app.use('/api/local-models', createLocalModelsRouter());
 
   // Vite middleware
   if (process.env.NODE_ENV !== 'production') {

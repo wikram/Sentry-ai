@@ -1,0 +1,42 @@
+configuration:
+  sources: ''
+  agents:
+    agent:
+      - id: agent-1784546828166-kfe3s5o3a
+        name: jkjbkjb
+        role: Specialized SRE Bot
+        avatar: Cpu
+        status: idle
+        isActive: true
+        backendUrl: http://192.168.1.143:8000
+        model: ai21/jamba-large-1.7
+        apiKey: sk-prj-xxxxxxxxxx
+        isDefault: false
+        findings:
+          finding: []
+      - id: agent-1784548218958-ghqbdhyws
+        name: kkljklj
+        role: Specialized SRE Bot
+        avatar: Cpu
+        status: idle
+        isActive: false
+        backendUrl: http://192.168.1.143:8000
+        model: ai21/jamba-large-1.7
+        apiKey: sk-prj-xxxxxxxxxx
+        isDefault: false
+        findings:
+          finding: []
+      - id: agent-1784548582428-jcte0ymzx
+        name: klknlknkln
+        role: Specialized SRE Bot
+        avatar: Cpu
+        status: idle
+        isActive: false
+        backendUrl: http://192.168.1.143:8000
+        model: aion-labs/aion-3.0-mini
+        apiKey: sk-prj-xxxxxxxxxx
+        isDefault: false
+        findings:
+          finding: []
+  selectedModel: ''
+  apiBackendUrl: ''
