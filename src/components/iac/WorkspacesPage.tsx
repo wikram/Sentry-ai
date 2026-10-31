@@ -49,7 +49,16 @@ import {
   Sliders
 } from 'lucide-react';
 import { IaCWorkspace, IaCVariable, GitRepoConfig } from '../../types/iac';
-import { loadWorkspaces, saveWorkspaces, loadActiveWorkspaceId, saveActiveWorkspaceId } from '../../data/iacStore';
+import {
+  loadWorkspaces,
+  saveWorkspaces,
+  loadActiveWorkspaceId,
+  saveActiveWorkspaceId,
+  planWorkspaces,
+  scopeStateBackend,
+  splitWorkspaceNames,
+  WorkspaceEnvironment
+} from '../../data/iacStore';
 
 interface WorkspacesPageProps {
   onNavigateToPlan?: (workspaceId: string) => void;
@@ -1444,12 +1453,12 @@ export default function WorkspacesPage({
               </div>
 
               <AddWorkspaceForm
+                existingNames={workspaces.map(w => w.name)}
                 onCancel={() => setShowAddModal(false)}
-                onSubmit={(newWs) => {
-                  const updated = [newWs, ...workspaces];
-                  updateWorkspaces(updated);
-                  setSelectedWorkspaceId(newWs.id);
-                  saveActiveWorkspaceId(newWs.id);
+                onSubmit={(newWorkspaces) => {
+                  updateWorkspaces([...newWorkspaces, ...workspaces]);
+                  setSelectedWorkspaceId(newWorkspaces[0].id);
+                  saveActiveWorkspaceId(newWorkspaces[0].id);
                   setShowAddModal(false);
                 }}
               />
@@ -1546,10 +1555,17 @@ export default function WorkspacesPage({
 }
 
 // FORM SUB-COMPONENT: Add Workspace
-function AddWorkspaceForm({ onCancel, onSubmit }: { onCancel: () => void; onSubmit: (ws: IaCWorkspace) => void }) {
+const WORKSPACE_ENVIRONMENTS: WorkspaceEnvironment[] = ['production', 'staging', 'development', 'sandbox'];
+const DEFAULT_WORKING_DIRECTORY = 'environments/production';
+const MULTIPLE_WORKING_DIRECTORY = 'environments/{env}/{name}';
+
+function AddWorkspaceForm({ existingNames, onCancel, onSubmit }: { existingNames: string[]; onCancel: () => void; onSubmit: (workspaces: IaCWorkspace[]) => void }) {
+  const [isMultiple, setIsMultiple] = useState(false);
   const [name, setName] = useState('');
+  const [multipleNames, setMultipleNames] = useState('');
+  const [selectedEnvironments, setSelectedEnvironments] = useState<WorkspaceEnvironment[]>(['production']);
   const [description, setDescription] = useState('');
-  const [environment, setEnvironment] = useState<'production' | 'staging' | 'development' | 'sandbox'>('production');
+  const [environment, setEnvironment] = useState<WorkspaceEnvironment>('production');
   const [provider, setProvider] = useState<'AWS' | 'GCP' | 'Azure' | 'Kubernetes'>('AWS');
   const [terraformVersion, setTerraformVersion] = useState('1.9.5');
   
@@ -1564,40 +1580,61 @@ function AddWorkspaceForm({ onCancel, onSubmit }: { onCancel: () => void; onSubm
   const [gitProvider, setGitProvider] = useState<'github' | 'gitlab'>('github');
   const [repoUrl, setRepoUrl] = useState('https://github.com/enterprise-cloud/terraform-infra');
   const [branch, setBranch] = useState('main');
-  const [workingDirectory, setWorkingDirectory] = useState('environments/production');
+  const [workingDirectory, setWorkingDirectory] = useState(DEFAULT_WORKING_DIRECTORY);
+
+  const { planned, invalid, conflicts } = isMultiple
+    ? planWorkspaces(splitWorkspaceNames(multipleNames), selectedEnvironments, existingNames)
+    : planWorkspaces([name], [environment], existingNames);
+  const canSubmit = planned.length > 0 && invalid.length === 0 && conflicts.length === 0;
+
+  const switchMode = (multiple: boolean) => {
+    setIsMultiple(multiple);
+    if (multiple && workingDirectory === DEFAULT_WORKING_DIRECTORY) setWorkingDirectory(MULTIPLE_WORKING_DIRECTORY);
+    if (!multiple && workingDirectory === MULTIPLE_WORKING_DIRECTORY) setWorkingDirectory(DEFAULT_WORKING_DIRECTORY);
+  };
+
+  const toggleEnvironment = (env: WorkspaceEnvironment) => {
+    setSelectedEnvironments(prev => prev.includes(env) ? prev.filter(e => e !== env) : [...prev, env]);
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (!canSubmit) return;
 
     const repoName = repoUrl.replace(/^https?:\/\/[^\/]+\//, '').replace(/\.git$/, '');
 
-    const newWs: IaCWorkspace = {
-      id: `ws-${Date.now()}`,
-      name: name.trim().toLowerCase().replace(/\s+/g, '-'),
+    onSubmit(planned.map(({ name: workspaceName, environment: workspaceEnvironment }, index) => buildWorkspace(workspaceName, workspaceEnvironment, index, repoName)));
+  };
+
+  const buildWorkspace = (workspaceName: string, workspaceEnvironment: WorkspaceEnvironment, index: number, repoName: string): IaCWorkspace => {
+    const stateBackend: IaCWorkspace['stateBackend'] = {
+      type: backendType,
+      ...(backendType === 'pg' ? {
+        connStr: pgConnStr,
+        schemaName: pgSchema
+      } : {
+        bucket: stateBucket,
+        key: stateKey,
+        region: provider === 'AWS' ? 'us-east-1' : 'europe-west3',
+        lockTable: 'tf-state-locks-dynamodb'
+      })
+    };
+
+    return {
+      id: `ws-${Date.now()}-${index}`,
+      name: workspaceName,
       description: description.trim() || 'Terraform OSS infrastructure workspace',
-      environment,
+      environment: workspaceEnvironment,
       provider,
       terraformVersion,
       executionMode: 'local',
-      stateBackend: {
-        type: backendType,
-        ...(backendType === 'pg' ? {
-          connStr: pgConnStr,
-          schemaName: pgSchema
-        } : {
-          bucket: stateBucket,
-          key: stateKey,
-          region: provider === 'AWS' ? 'us-east-1' : 'europe-west3',
-          lockTable: 'tf-state-locks-dynamodb'
-        })
-      },
+      stateBackend: isMultiple ? scopeStateBackend(stateBackend, workspaceName) : stateBackend,
       gitConfig: {
         provider: gitProvider,
         repoUrl,
         repoName: repoName || 'enterprise/terraform-infra',
         branch,
-        workingDirectory,
+        workingDirectory: workingDirectory.replace(/\{name\}/g, workspaceName).replace(/\{env\}/g, workspaceEnvironment),
         authType: 'pat',
         webhookEnabled: true,
         lastCommitHash: 'e4b7c21',
@@ -1626,43 +1663,114 @@ function AddWorkspaceForm({ onCancel, onSubmit }: { onCancel: () => void; onSubm
       costDelta: 0,
       autoApply: false,
       speculativePlans: true,
-      tags: [environment, provider.toLowerCase(), 'terraform-oss', backendType === 'pg' ? 'postgres-backend' : 'cloud-backend'],
+      tags: [workspaceEnvironment, provider.toLowerCase(), 'terraform-oss', backendType === 'pg' ? 'postgres-backend' : 'cloud-backend'],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
-
-    onSubmit(newWs);
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4 text-xs font-sans">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div>
-          <label className="text-[10px] font-bold uppercase text-slate-600">Workspace Name *</label>
-          <input
-            type="text"
-            required
-            placeholder="e.g. prod-vpc-postgres-backend"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs font-bold text-slate-900 focus:ring-2 focus:ring-cyan-500/20 focus:outline-none"
-          />
-        </div>
-
-        <div>
-          <label className="text-[10px] font-bold uppercase text-slate-600">Environment</label>
-          <select
-            value={environment}
-            onChange={(e) => setEnvironment(e.target.value as any)}
-            className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:ring-2 focus:ring-cyan-500/20 focus:outline-none"
+      <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl w-fit">
+        {[false, true].map(multiple => (
+          <button
+            key={String(multiple)}
+            type="button"
+            onClick={() => switchMode(multiple)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${isMultiple === multiple ? 'bg-white text-cyan-700 shadow-xs' : 'text-slate-500 hover:text-slate-700'}`}
           >
-            <option value="production">Production</option>
-            <option value="staging">Staging</option>
-            <option value="development">Development</option>
-            <option value="sandbox">Sandbox</option>
-          </select>
-        </div>
+            {multiple ? 'Multiple Workspaces' : 'Single Workspace'}
+          </button>
+        ))}
       </div>
+
+      {isMultiple ? (
+        <div className="space-y-3">
+          <div>
+            <label className="text-[10px] font-bold uppercase text-slate-600">Workspace Names *</label>
+            <textarea
+              rows={4}
+              placeholder={'One per line or comma separated, e.g.\nnetwork\neks-cluster\npostgres'}
+              value={multipleNames}
+              onChange={(e) => setMultipleNames(e.target.value)}
+              className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs font-bold text-slate-900 focus:ring-2 focus:ring-cyan-500/20 focus:outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="text-[10px] font-bold uppercase text-slate-600">Environments *</label>
+            <div className="flex flex-wrap gap-4 mt-1">
+              {WORKSPACE_ENVIRONMENTS.map(env => (
+                <label key={env} className="flex items-center gap-1.5 text-xs font-semibold capitalize text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedEnvironments.includes(env)}
+                    onChange={() => toggleEnvironment(env)}
+                    className="rounded text-cyan-600 focus:ring-cyan-500"
+                  />
+                  <span>{env}</span>
+                </label>
+              ))}
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1">Choosing several creates each name once per environment, e.g. network-staging.</p>
+          </div>
+
+          {planned.length > 0 && (
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
+              <div className="text-[10px] font-bold uppercase text-slate-600">{planned.length} workspaces will be created</div>
+              <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
+                {planned.map(p => (
+                  <span
+                    key={p.name}
+                    className={`px-1.5 py-0.5 rounded font-mono text-[11px] font-bold ${conflicts.includes(p.name) || invalid.includes(p.name) ? 'bg-rose-50 text-rose-700' : 'bg-cyan-50 text-cyan-800'}`}
+                  >
+                    {p.name}
+                  </span>
+                ))}
+              </div>
+              <p className="text-[11px] text-slate-400">Settings below apply to all of them. Each gets its own Terraform state location.</p>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="text-[10px] font-bold uppercase text-slate-600">Workspace Name *</label>
+            <input
+              type="text"
+              required
+              placeholder="e.g. prod-vpc-postgres-backend"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs font-bold text-slate-900 focus:ring-2 focus:ring-cyan-500/20 focus:outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="text-[10px] font-bold uppercase text-slate-600">Environment</label>
+            <select
+              value={environment}
+              onChange={(e) => setEnvironment(e.target.value as any)}
+              className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:ring-2 focus:ring-cyan-500/20 focus:outline-none"
+            >
+              <option value="production">Production</option>
+              <option value="staging">Staging</option>
+              <option value="development">Development</option>
+              <option value="sandbox">Sandbox</option>
+            </select>
+          </div>
+        </div>
+      )}
+
+      {(conflicts.length > 0 || invalid.length > 0) && (
+        <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs font-medium flex items-center gap-2">
+          <AlertTriangle size={16} className="shrink-0" />
+          <span>
+            {conflicts.length > 0 && `Already exists: ${conflicts.join(', ')}. `}
+            {invalid.length > 0 && `Use only letters, numbers, and . _ - in: ${invalid.join(', ')}.`}
+          </span>
+        </div>
+      )}
 
       <div>
         <label className="text-[10px] font-bold uppercase text-slate-600">Description</label>
@@ -1827,6 +1935,7 @@ function AddWorkspaceForm({ onCancel, onSubmit }: { onCancel: () => void; onSubm
             onChange={(e) => setWorkingDirectory(e.target.value)}
             className="w-full mt-1 px-3 py-1.5 bg-white border border-slate-200 rounded-xl font-mono text-xs text-slate-900"
           />
+          {isMultiple && <p className="text-[11px] text-slate-400 mt-1">Use {'{name}'} and {'{env}'} for a different folder per workspace.</p>}
         </div>
       </div>
 
@@ -1840,9 +1949,10 @@ function AddWorkspaceForm({ onCancel, onSubmit }: { onCancel: () => void; onSubm
         </button>
         <button
           type="submit"
-          className="px-5 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs"
+          disabled={!canSubmit}
+          className="px-5 py-2 bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-xs"
         >
-          Create Workspace
+          {isMultiple ? `Create ${planned.length} Workspace${planned.length === 1 ? '' : 's'}` : 'Create Workspace'}
         </button>
       </div>
     </form>

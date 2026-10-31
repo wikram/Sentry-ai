@@ -648,6 +648,39 @@ resource "kubernetes_namespace" "production" {
 ];
 
 // Helper functions for persistent storage
+export type WorkspaceEnvironment = 'production' | 'staging' | 'development' | 'sandbox';
+
+export interface PlannedWorkspace {
+  name: string;
+  environment: WorkspaceEnvironment;
+}
+
+export function splitWorkspaceNames(raw: string): string[] {
+  return raw.split(/[\n,]/).map(name => name.trim()).filter(Boolean);
+}
+
+// Expands names across environments, suffixing them when more than one environment is chosen
+export function planWorkspaces(names: string[], environments: WorkspaceEnvironment[], existingNames: string[]) {
+  const baseNames = [...new Set(names.map(name => name.trim().toLowerCase().replace(/\s+/g, '-')).filter(Boolean))];
+  const planned: PlannedWorkspace[] = baseNames.flatMap(name => environments.map(environment => ({
+    name: environments.length > 1 ? `${name}-${environment}` : name,
+    environment
+  })));
+  return {
+    planned,
+    invalid: planned.map(p => p.name).filter(name => !/^[a-z0-9][a-z0-9._-]*$/.test(name)),
+    conflicts: planned.map(p => p.name).filter(name => existingNames.includes(name))
+  };
+}
+
+// Workspaces created together would otherwise share one Terraform state and overwrite each other
+export function scopeStateBackend(backend: IaCWorkspace['stateBackend'], workspaceName: string): IaCWorkspace['stateBackend'] {
+  if (backend.type === 'pg') {
+    return { ...backend, schemaName: `${backend.schemaName}_${workspaceName.replace(/[^a-z0-9_]/g, '_')}` };
+  }
+  return { ...backend, key: `${workspaceName}/${backend.key}` };
+}
+
 export function loadWorkspaces(): IaCWorkspace[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_WORKSPACES);

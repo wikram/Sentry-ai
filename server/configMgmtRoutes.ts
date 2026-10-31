@@ -21,16 +21,36 @@ import {
   testGitHubConnection,
   syncAnsibleFromGitHub
 } from './configMgmtService';
+import {
+  VaultError,
+  isVaultConfigured,
+  getVaultStatus,
+  connectVault,
+  disconnectVault,
+  listVaultSecrets,
+  storeVaultSecret
+} from './vaultService';
+
+// A Vault outage should not hide the secrets held locally
+async function listAllSecrets() {
+  const localSecrets = getRealSecrets();
+  try {
+    return { secrets: [...await listVaultSecrets(), ...localSecrets] };
+  } catch (err) {
+    if (!(err instanceof VaultError)) throw err;
+    return { secrets: localSecrets, vaultError: err.message };
+  }
+}
 
 export function createConfigMgmtRouter(): express.Router {
   const router = express.Router();
 
   // 1. Overview API
-  router.get('/overview', (req, res) => {
+  router.get('/overview', async (req, res) => {
     try {
       const hosts = getRealHosts();
       const manifests = getRealManifests();
-      const secrets = getRealSecrets();
+      const { secrets } = await listAllSecrets();
       const compliance = getRealCisAudit();
       const runs = loadExecutionRuns();
 
@@ -108,28 +128,67 @@ export function createConfigMgmtRouter(): express.Router {
   });
 
   // 4. Secrets Vault API
-  router.get('/secrets', (req, res) => {
+  router.get('/secrets', async (req, res) => {
     try {
-      const secrets = getRealSecrets();
-      res.json({ success: true, secrets });
+      res.json({ success: true, ...await listAllSecrets() });
     } catch (err: any) {
       console.error('Error in /api/config-mgmt/secrets:', err);
       res.status(500).json({ success: false, error: err.message });
     }
   });
 
-  router.post('/secrets', (req, res) => {
+  router.post('/secrets', async (req, res) => {
     try {
       const { key, value, environment, scope } = req.body;
       if (!key || !value) {
         return res.status(400).json({ success: false, error: 'Key and value are required' });
       }
 
-      addOrUpdateSecret(key, value, environment, scope);
-      const updatedSecrets = getRealSecrets();
-      res.json({ success: true, message: `Secret ${key} persisted successfully`, secrets: updatedSecrets });
+      // Never fall back to plaintext on disk when Vault is configured but failing
+      if (isVaultConfigured()) {
+        await storeVaultSecret(key, value, environment, scope);
+      } else {
+        addOrUpdateSecret(key, value, environment, scope);
+      }
+      res.json({ success: true, message: `Secret ${key} persisted successfully`, ...await listAllSecrets() });
     } catch (err: any) {
+      if (err instanceof VaultError) {
+        return res.status(502).json({ success: false, error: err.message });
+      }
       console.error('Error saving secret:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // HashiCorp Vault connection
+  router.get('/vault', async (req, res) => {
+    try {
+      res.json({ success: true, vault: await getVaultStatus() });
+    } catch (err: any) {
+      console.error('Error in GET /api/config-mgmt/vault:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  router.post('/vault', async (req, res) => {
+    try {
+      await connectVault(req.body);
+      res.json({ success: true, vault: await getVaultStatus() });
+    } catch (err: any) {
+      if (err instanceof VaultError) {
+        return res.status(400).json({ success: false, error: err.message });
+      }
+      console.error('Error in POST /api/config-mgmt/vault:', err);
+      res.status(500).json({ success: false, error: 'Failed to connect to Vault' });
+    }
+  });
+
+  router.delete('/vault', async (req, res) => {
+    try {
+      disconnectVault();
+      res.json({ success: true, vault: await getVaultStatus() });
+    } catch (err: any) {
+      console.error('Error in DELETE /api/config-mgmt/vault:', err);
       res.status(500).json({ success: false, error: err.message });
     }
   });

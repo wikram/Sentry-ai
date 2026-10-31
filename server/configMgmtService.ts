@@ -3,16 +3,12 @@ import path from 'path';
 import os from 'os';
 import { execSync } from 'child_process';
 
-const PLAYBOOKS_DIR = path.join(process.cwd(), 'playbooks');
 const RUNS_LOG_PATH = path.join(process.cwd(), 'logs', 'execution_runs.json');
 const SECRETS_STORE_PATH = path.join(process.cwd(), 'logs', 'custom_secrets.json');
 const CONFIG_XML_PATH = path.join(process.cwd(), 'config.xml');
 
 // Ensure directories exist
 function ensureDirs() {
-  if (!fs.existsSync(PLAYBOOKS_DIR)) {
-    fs.mkdirSync(PLAYBOOKS_DIR, { recursive: true });
-  }
   const logsDir = path.join(process.cwd(), 'logs');
   if (!fs.existsSync(logsDir)) {
     fs.mkdirSync(logsDir, { recursive: true });
@@ -108,7 +104,7 @@ export function loadExecutionRuns(): any[] {
       id: 'run-init-01',
       jobName: 'System Host & Service Baseline Audit',
       playbook: 'system-baseline.yml',
-      playbookFile: 'playbooks/system-baseline.yml',
+      playbookFile: 'ansible/playbooks/system-baseline.yml',
       inventory: 'localhost (Container Engine)',
       triggeredBy: 'system-bootstrap',
       startTime: new Date(Date.now() - 1000 * 60 * 35).toISOString(),
@@ -231,17 +227,20 @@ export function getRealManifests() {
 
   // 1. Playbooks directory
   try {
-    const playbookFiles = fs.readdirSync(PLAYBOOKS_DIR);
+    const cfg = getAnsibleConfig();
+    const playbooksDir = resolveAnsiblePath(cfg, cfg.playbooksDir);
+    fs.mkdirSync(playbooksDir, { recursive: true });
+    const playbookFiles = fs.readdirSync(playbooksDir);
     for (const filename of playbookFiles) {
       if (filename.endsWith('.yml') || filename.endsWith('.yaml')) {
-        const filePath = path.join(PLAYBOOKS_DIR, filename);
+        const filePath = path.join(playbooksDir, filename);
         const stats = fs.statSync(filePath);
         const content = fs.readFileSync(filePath, 'utf-8');
         manifests.push({
           id: `man-${filename.replace(/[^a-zA-Z0-9]/g, '-')}`,
           name: filename,
           type: 'ansible',
-          path: `playbooks/${filename}`,
+          path: path.relative(process.cwd(), filePath),
           lastModified: new Date(stats.mtime).toLocaleString(),
           author: 'DevSecOps Automation',
           branch: 'main',
@@ -356,6 +355,7 @@ export function getRealSecrets() {
         key: item.key,
         value: maskSecret(rawVal),
         fullValue: rawVal,
+        source: 'env' as const,
         environment: item.env,
         scope: item.scope,
         lastRotated: '2026-09-01',
@@ -372,6 +372,7 @@ export function getRealSecrets() {
       key,
       value: maskSecret(details.value),
       fullValue: details.value,
+      source: 'local' as const,
       environment: details.environment || 'production',
       scope: details.scope || 'Custom Application Secret',
       lastRotated: details.lastRotated || new Date().toISOString().split('T')[0],
@@ -477,7 +478,7 @@ export function getRealCisAudit() {
       targetNode: `${os.hostname()}.internal`,
       severity: 'HIGH',
       category: 'Resource Allocation',
-      remediationSnippet: 'playbooks/memory-pressure-remediation.yml',
+      remediationSnippet: 'ansible/playbooks/memory-pressure-remediation.yml',
       description: `Current free memory is at ${freeMemPercent}%. Potential risk of kernel OOM killer terminating daemon processes.`
     });
   } else {
@@ -518,7 +519,7 @@ export async function executePlaybookRun(params: {
 }) {
   const startTime = new Date();
   const runId = `job-${Date.now().toString().slice(-4)}`;
-  const playbookFile = params.playbookFile || `playbooks/${params.playbookName}`;
+  const playbookFile = params.playbookFile || `ansible/playbooks/${params.playbookName}`;
   const targetGroup = params.targetGroup || 'localhost (Container Engine)';
   const mode = params.mode === 'check' ? 'DRY_RUN' : 'LIVE';
 
@@ -661,11 +662,9 @@ export interface AnsibleTestResult {
 }
 
 const ANSIBLE_SETTINGS_FILE = path.join(process.cwd(), 'logs', 'ansible_settings.json');
-const DEFAULT_INVENTORY_FILE = path.join(process.cwd(), 'inventory', 'hosts.ini');
-const DEFAULT_ANSIBLE_CFG = path.join(process.cwd(), 'ansible.cfg');
 
 const DEFAULT_ANSIBLE_CONFIG: AnsibleConfig = {
-  ansibleDirectory: '.',
+  ansibleDirectory: 'ansible',
   ansibleLocation: '/usr/bin/ansible-playbook',
   ansibleBinary: '/usr/bin/ansible',
   inventoryFile: 'inventory/hosts.ini',
@@ -689,6 +688,11 @@ const DEFAULT_ANSIBLE_CONFIG: AnsibleConfig = {
   vaultPasswordFile: '.vault_pass',
   logPath: 'logs/ansible.log'
 };
+
+// All Ansible content lives under ansibleDirectory; configured paths are relative to it
+function resolveAnsiblePath(cfg: AnsibleConfig, subPath = '.'): string {
+  return path.resolve(process.cwd(), cfg.ansibleDirectory || '.', subPath);
+}
 
 export function getAnsibleConfig(): AnsibleConfig {
   try {
@@ -720,13 +724,8 @@ export function saveAnsibleConfig(newConfig: Partial<AnsibleConfig>): AnsibleCon
 
   // Also synchronize to ansible.cfg if appropriate
   try {
-    const baseDir = updated.ansibleDirectory && updated.ansibleDirectory !== '.'
-      ? (path.isAbsolute(updated.ansibleDirectory) ? updated.ansibleDirectory : path.resolve(process.cwd(), updated.ansibleDirectory))
-      : process.cwd();
-
-    const cfgPath = path.isAbsolute(updated.configFilePath)
-      ? updated.configFilePath
-      : path.resolve(baseDir, updated.configFilePath || 'ansible.cfg');
+    const baseDir = resolveAnsiblePath(updated);
+    const cfgPath = path.resolve(baseDir, updated.configFilePath || 'ansible.cfg');
 
     const cfgDir = path.dirname(cfgPath);
     if (!fs.existsSync(cfgDir)) {
@@ -772,8 +771,8 @@ ssh_args = -C -o ControlMaster=auto -o ControlPersist=60s
   return updated;
 }
 
-export function parseInventoryFile(inventoryPath: string): { hostsCount: number; groups: string[]; exists: boolean } {
-  const resolved = path.isAbsolute(inventoryPath) ? inventoryPath : path.join(process.cwd(), inventoryPath);
+export function parseInventoryFile(inventoryPath: string, cfg: AnsibleConfig = getAnsibleConfig()): { hostsCount: number; groups: string[]; exists: boolean } {
+  const resolved = resolveAnsiblePath(cfg, inventoryPath);
   if (!fs.existsSync(resolved)) {
     return { hostsCount: 0, groups: [], exists: false };
   }
@@ -854,13 +853,13 @@ export function testAnsibleSetup(customConfig?: Partial<AnsibleConfig>): Ansible
   }
 
   // 2. Test inventory file
-  const inventoryInfo = parseInventoryFile(cfg.inventoryFile);
+  const inventoryInfo = parseInventoryFile(cfg.inventoryFile, cfg);
   const inventoryDetails = inventoryInfo.exists
     ? `Inventory file verified: ${inventoryInfo.hostsCount} hosts identified across ${inventoryInfo.groups.length} groups (${inventoryInfo.groups.join(', ')}).`
     : `Warning: Inventory file not found at "${cfg.inventoryFile}". Please check path or create file.`;
 
   // 3. Test playbooks directory
-  const playbooksPath = path.isAbsolute(cfg.playbooksDir) ? cfg.playbooksDir : path.join(process.cwd(), cfg.playbooksDir);
+  const playbooksPath = resolveAnsiblePath(cfg, cfg.playbooksDir);
   let playbooksExists = false;
   let playbookFiles: string[] = [];
 
@@ -905,8 +904,9 @@ export function testAnsibleSetup(customConfig?: Partial<AnsibleConfig>): Ansible
 }
 
 export function getInventoryRawContent(customPath?: string): { path: string; content: string; exists: boolean; hostsCount: number; groups: string[] } {
-  const targetPath = customPath || getAnsibleConfig().inventoryFile;
-  const resolved = path.isAbsolute(targetPath) ? targetPath : path.join(process.cwd(), targetPath);
+  const cfg = getAnsibleConfig();
+  const targetPath = customPath || cfg.inventoryFile;
+  const resolved = resolveAnsiblePath(cfg, targetPath);
 
   if (fs.existsSync(resolved)) {
     try {
@@ -928,8 +928,9 @@ export function getInventoryRawContent(customPath?: string): { path: string; con
 }
 
 export function saveInventoryRawContent(content: string, customPath?: string): { success: boolean; path: string; message: string; hostsCount: number; groups: string[] } {
-  const targetPath = customPath || getAnsibleConfig().inventoryFile;
-  const resolved = path.isAbsolute(targetPath) ? targetPath : path.join(process.cwd(), targetPath);
+  const cfg = getAnsibleConfig();
+  const targetPath = customPath || cfg.inventoryFile;
+  const resolved = resolveAnsiblePath(cfg, targetPath);
 
   try {
     const parentDir = path.dirname(resolved);
@@ -991,9 +992,7 @@ export interface DirectoryInspection {
 
 export function inspectAnsibleDirectories(customConfig?: Partial<AnsibleConfig>): DirectoryInspection {
   const cfg = { ...getAnsibleConfig(), ...(customConfig || {}) };
-  const baseDir = cfg.ansibleDirectory && cfg.ansibleDirectory !== '.'
-    ? (path.isAbsolute(cfg.ansibleDirectory) ? cfg.ansibleDirectory : path.resolve(process.cwd(), cfg.ansibleDirectory))
-    : process.cwd();
+  const baseDir = resolveAnsiblePath(cfg);
 
   const baseExists = fs.existsSync(baseDir);
   let isWritable = false;
@@ -1047,9 +1046,10 @@ export function inspectAnsibleDirectories(customConfig?: Partial<AnsibleConfig>)
     label: string,
     subPath: string,
     format: 'JSON' | 'INI' | 'YAML' | 'LOG',
-    description: string
+    description: string,
+    base = process.cwd()
   ): AnsibleStorageLocation => {
-    const resolved = path.isAbsolute(subPath) ? subPath : path.resolve(process.cwd(), subPath);
+    const resolved = path.resolve(base, subPath);
     const exists = fs.existsSync(resolved);
     let sizeBytes: number | undefined;
     let lastModified: string | undefined;
@@ -1103,14 +1103,16 @@ export function inspectAnsibleDirectories(customConfig?: Partial<AnsibleConfig>)
       'Active Host Inventory',
       cfg.inventoryFile || 'inventory/hosts.ini',
       'INI',
-      'Hosts, target groups, SSH connection variables, and target environments.'
+      'Hosts, target groups, SSH connection variables, and target environments.',
+      baseDir
     ),
     getFileStorageInfo(
       'ansible_log',
       'Ansible Execution Log',
       cfg.logPath || 'logs/ansible.log',
       'LOG',
-      'Standard output, error logs, and execution stream from playbook runs.'
+      'Standard output, error logs, and execution stream from playbook runs.',
+      baseDir
     ),
     getFileStorageInfo(
       'runs_history',
@@ -1135,9 +1137,7 @@ export function inspectAnsibleDirectories(customConfig?: Partial<AnsibleConfig>)
 
 export function scaffoldAnsibleDirectories(customConfig?: Partial<AnsibleConfig>): { success: boolean; created: string[]; message: string } {
   const cfg = { ...getAnsibleConfig(), ...(customConfig || {}) };
-  const baseDir = cfg.ansibleDirectory && cfg.ansibleDirectory !== '.'
-    ? (path.isAbsolute(cfg.ansibleDirectory) ? cfg.ansibleDirectory : path.resolve(process.cwd(), cfg.ansibleDirectory))
-    : process.cwd();
+  const baseDir = resolveAnsiblePath(cfg);
 
   const created: string[] = [];
 
@@ -1204,9 +1204,7 @@ db-primary.internal ansible_host=10.0.2.20
 
 export function getAnsibleCfgContent(customConfig?: Partial<AnsibleConfig>): { path: string; content: string; exists: boolean } {
   const cfg = { ...getAnsibleConfig(), ...(customConfig || {}) };
-  const baseDir = cfg.ansibleDirectory && cfg.ansibleDirectory !== '.'
-    ? (path.isAbsolute(cfg.ansibleDirectory) ? cfg.ansibleDirectory : path.resolve(process.cwd(), cfg.ansibleDirectory))
-    : process.cwd();
+  const baseDir = resolveAnsiblePath(cfg);
 
   const cfgPath = path.isAbsolute(cfg.configFilePath)
     ? cfg.configFilePath
@@ -1564,14 +1562,17 @@ export async function syncAnsibleFromGitHub(forcePull: boolean = false): Promise
 
     // 3. Artifact Synchronization into Devops Studio locations
     if (changesDetected) {
+      const ansibleCfg = getAnsibleConfig();
+
       // Sync Playbooks
       if (config.syncPlaybooks) {
         const repoPlaybooksDir = path.join(targetDir, 'playbooks');
-        const activePlaybooksDir = PLAYBOOKS_DIR;
+        const activePlaybooksDir = resolveAnsiblePath(ansibleCfg, ansibleCfg.playbooksDir);
         if (fs.existsSync(repoPlaybooksDir)) {
           copyDirRecursive(repoPlaybooksDir, activePlaybooksDir);
         } else {
           // If playbooks are in root of repo (*.yml or *.yaml)
+          fs.mkdirSync(activePlaybooksDir, { recursive: true });
           const rootFiles = fs.readdirSync(targetDir);
           for (const f of rootFiles) {
             if (f.endsWith('.yml') || f.endsWith('.yaml')) {
@@ -1584,7 +1585,7 @@ export async function syncAnsibleFromGitHub(forcePull: boolean = false): Promise
       // Sync Roles
       if (config.syncRoles) {
         const repoRolesDir = path.join(targetDir, 'roles');
-        const activeRolesDir = path.join(process.cwd(), 'roles');
+        const activeRolesDir = resolveAnsiblePath(ansibleCfg, ansibleCfg.rolesDir);
         if (fs.existsSync(repoRolesDir)) {
           copyDirRecursive(repoRolesDir, activeRolesDir);
         }
@@ -1600,8 +1601,8 @@ export async function syncAnsibleFromGitHub(forcePull: boolean = false): Promise
         ];
         for (const candidate of candidates) {
           if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
-            const activeInv = path.join(process.cwd(), 'inventory', 'hosts.ini');
-            ensureDirs();
+            const activeInv = resolveAnsiblePath(ansibleCfg, ansibleCfg.inventoryFile);
+            fs.mkdirSync(path.dirname(activeInv), { recursive: true });
             fs.copyFileSync(candidate, activeInv);
             break;
           }
@@ -1612,7 +1613,7 @@ export async function syncAnsibleFromGitHub(forcePull: boolean = false): Promise
       if (config.syncAnsibleCfg) {
         const repoCfg = path.join(targetDir, 'ansible.cfg');
         if (fs.existsSync(repoCfg)) {
-          fs.copyFileSync(repoCfg, path.join(process.cwd(), 'ansible.cfg'));
+          fs.copyFileSync(repoCfg, resolveAnsiblePath(ansibleCfg, ansibleCfg.configFilePath));
         }
       }
     }

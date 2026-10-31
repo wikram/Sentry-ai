@@ -23,7 +23,8 @@ import {
   Layers, 
   History,
   ShieldAlert,
-  RefreshCw
+  RefreshCw,
+  Unplug
 } from 'lucide-react';
 
 export interface SecretItem {
@@ -31,11 +32,26 @@ export interface SecretItem {
   key: string;
   value: string;
   fullValue?: string;
+  source: 'vault' | 'local' | 'env';
+  vaultPath?: string;
   environment: 'production' | 'staging' | 'development';
   scope: string;
   lastRotated: string;
   expiresInDays: number;
   status: 'valid' | 'expiring_soon' | 'expired';
+}
+
+interface VaultStatus {
+  address: string;
+  mount: string;
+  pathPrefix: string;
+  namespace: string;
+  configured: boolean;
+  connected: boolean;
+  hasToken: boolean;
+  tokenFromEnv: boolean;
+  version?: string;
+  error?: string;
 }
 
 export const INITIAL_SECRETS: SecretItem[] = [];
@@ -55,6 +71,30 @@ export default function SecretsVaultPage() {
   const [newKeyValue, setNewKeyValue] = useState('');
   const [newKeyEnv, setNewKeyEnv] = useState<'production' | 'staging' | 'development'>('production');
   const [newKeyScope, setNewKeyScope] = useState('');
+  const [secretError, setSecretError] = useState<string | null>(null);
+
+  // HashiCorp Vault Connection State
+  const [vault, setVault] = useState<VaultStatus | null>(null);
+  const [vaultForm, setVaultForm] = useState({ address: '', token: '', mount: 'secret', pathPrefix: 'devops-studio', namespace: '' });
+  const [isVaultFormOpen, setIsVaultFormOpen] = useState(false);
+  const [isConnectingVault, setIsConnectingVault] = useState(false);
+  const [vaultFormError, setVaultFormError] = useState<string | null>(null);
+  const [vaultListError, setVaultListError] = useState<string | null>(null);
+
+  const applyVaultStatus = (status: VaultStatus) => {
+    setVault(status);
+    setVaultForm({ address: status.address, token: '', mount: status.mount, pathPrefix: status.pathPrefix, namespace: status.namespace });
+  };
+
+  const fetchVaultStatus = async () => {
+    try {
+      const res = await fetch('/api/config-mgmt/vault');
+      const data = await res.json();
+      if (data.success) applyVaultStatus(data.vault);
+    } catch (err) {
+      console.error('Failed to load Vault status:', err);
+    }
+  };
 
   const fetchSecrets = async () => {
     try {
@@ -64,6 +104,7 @@ export default function SecretsVaultPage() {
         const data = await res.json();
         if (data.success && Array.isArray(data.secrets)) {
           setSecrets(data.secrets);
+          setVaultListError(data.vaultError || null);
         }
       }
     } catch (err) {
@@ -75,6 +116,7 @@ export default function SecretsVaultPage() {
 
   useEffect(() => {
     fetchSecrets();
+    fetchVaultStatus();
   }, []);
 
   const showNotification = (msg: string) => {
@@ -93,9 +135,13 @@ export default function SecretsVaultPage() {
     setTimeout(() => setCopiedKey(null), 2500);
   };
 
-  const handleRotateSecret = (sec: SecretItem) => {
-    setSecrets(prev => prev.map(s => s.id === sec.id ? { ...s, lastRotated: new Date().toISOString().split('T')[0], expiresInDays: 90, status: 'valid' } : s));
-    showNotification(`Auto-rotation initiated for ${sec.key}. Secret refreshed.`);
+  const openSecretModal = (sec?: SecretItem) => {
+    setNewKeyName(sec?.key || '');
+    setNewKeyValue('');
+    setNewKeyEnv(sec?.environment || 'production');
+    setNewKeyScope(sec?.scope || '');
+    setSecretError(null);
+    setIsAddModalOpen(true);
   };
 
   const handleCreateSecret = async (e: React.FormEvent) => {
@@ -103,6 +149,7 @@ export default function SecretsVaultPage() {
     if (!newKeyName || !newKeyValue) return;
 
     const formattedKey = newKeyName.toUpperCase().replace(/\s+/g, '_');
+    setSecretError(null);
     try {
       const res = await fetch('/api/config-mgmt/secrets', {
         method: 'POST',
@@ -114,23 +161,60 @@ export default function SecretsVaultPage() {
           scope: newKeyScope || 'Application Service'
         })
       });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.secrets) {
-          setSecrets(data.secrets);
-        } else {
-          await fetchSecrets();
-        }
-        showNotification(`Secret ${formattedKey} securely stored and encrypted.`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setSecretError(data.error || `Request failed with status ${res.status}`);
+        return;
       }
+      setSecrets(data.secrets);
+      setVaultListError(data.vaultError || null);
+      showNotification(vault?.configured ? `Secret ${formattedKey} stored in HashiCorp Vault.` : `Secret ${formattedKey} saved on this server, unencrypted.`);
     } catch (err) {
-      showNotification(`Saved secret ${formattedKey} locally.`);
+      setSecretError('Could not reach the server. The secret was not saved.');
+      return;
     }
 
     setIsAddModalOpen(false);
     setNewKeyName('');
     setNewKeyValue('');
     setNewKeyScope('');
+  };
+
+  const handleConnectVault = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setVaultFormError(null);
+    setIsConnectingVault(true);
+    try {
+      const res = await fetch('/api/config-mgmt/vault', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(vaultForm)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setVaultFormError(data.error || `Request failed with status ${res.status}`);
+        return;
+      }
+      applyVaultStatus(data.vault);
+      setIsVaultFormOpen(false);
+      await fetchSecrets();
+      showNotification(`Connected to HashiCorp Vault at ${data.vault.address}.`);
+    } catch (err) {
+      setVaultFormError('Could not reach the server.');
+    } finally {
+      setIsConnectingVault(false);
+    }
+  };
+
+  const handleDisconnectVault = async () => {
+    if (!confirm('Disconnect from HashiCorp Vault? Secrets stay in Vault, but new secrets will be saved on this server, unencrypted.')) return;
+    const res = await fetch('/api/config-mgmt/vault', { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (data.success) {
+      applyVaultStatus(data.vault);
+      await fetchSecrets();
+      showNotification(data.vault.configured ? 'Saved Vault settings removed. VAULT_ADDR and VAULT_TOKEN are still set.' : 'Disconnected from HashiCorp Vault.');
+    }
   };
 
   const filteredSecrets = secrets.filter(s => {
@@ -141,6 +225,9 @@ export default function SecretsVaultPage() {
   });
 
   const expiringCount = secrets.filter(s => s.status === 'expiring_soon').length;
+  const vaultCount = secrets.filter(s => s.source === 'vault').length;
+  const localCount = secrets.filter(s => s.source === 'local').length;
+  const showVaultForm = isVaultFormOpen || !vault?.connected;
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
@@ -171,17 +258,17 @@ export default function SecretsVaultPage() {
                 <span className="text-[10px] font-extrabold uppercase tracking-widest text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-md">
                   Configuration Management
                 </span>
-                <span className="text-[10px] font-mono font-bold text-slate-400">Vault &bull; Sealed Secrets &bull; AES-256</span>
+                <span className="text-[10px] font-mono font-bold text-slate-400">HashiCorp Vault &bull; KV v2</span>
               </div>
               <h2 className="text-xl font-extrabold tracking-tight text-slate-900 mt-1">Secrets & Key Vault</h2>
               <p className="text-xs text-slate-500 font-medium mt-0.5">
-                Hardware-backed cryptographic secrets storage, automated key rotation schedules & zero-knowledge runtime injection.
+                Store secrets in HashiCorp Vault. Values are write-only here: this page shows names and paths, never Vault values.
               </p>
             </div>
           </div>
 
           <button
-            onClick={() => setIsAddModalOpen(true)}
+            onClick={() => openSecretModal()}
             className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-indigo-600/20 flex items-center gap-2 shrink-0"
           >
             <Plus size={14} />
@@ -194,13 +281,17 @@ export default function SecretsVaultPage() {
           <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Secrets</span>
             <div className="text-2xl font-black text-slate-900 mt-1">{secrets.length}</div>
-            <span className="text-[11px] font-medium text-slate-500 font-mono">AES-256 GCM Encrypted</span>
+            <span className="text-[11px] font-medium text-slate-500 font-mono">{vaultCount} in Vault</span>
           </div>
 
           <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Vault Engine</span>
-            <div className="text-2xl font-black text-emerald-600 mt-1">Active</div>
-            <span className="text-[11px] font-medium text-emerald-600 font-mono">HashiCorp Vault v1.16</span>
+            <div className={`text-2xl font-black mt-1 ${vault?.connected ? 'text-emerald-600' : 'text-slate-900'}`}>
+              {vault?.connected ? 'Connected' : vault?.configured ? 'Error' : 'Off'}
+            </div>
+            <span className="text-[11px] font-medium text-slate-500 font-mono">
+              {vault?.connected ? `HashiCorp Vault v${vault.version}` : 'HashiCorp Vault'}
+            </span>
           </div>
 
           <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4">
@@ -210,11 +301,130 @@ export default function SecretsVaultPage() {
           </div>
 
           <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Audit Status</span>
-            <div className="text-2xl font-black text-indigo-600 mt-1">Compliant</div>
-            <span className="text-[11px] font-medium text-slate-500 font-mono">Zero Plaintext Leaks</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Saved Locally</span>
+            <div className={`text-2xl font-black mt-1 ${localCount > 0 ? 'text-amber-600' : 'text-slate-900'}`}>{localCount}</div>
+            <span className="text-[11px] font-medium text-slate-500 font-mono">Unencrypted on disk</span>
           </div>
         </div>
+      </div>
+
+      {/* HashiCorp Vault Connection */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div className="min-w-0">
+            <h3 className="font-bold text-sm text-slate-900">HashiCorp Vault Connection</h3>
+            <p className="text-xs text-slate-500 font-mono truncate">
+              {vault?.connected
+                ? `${vault.address} • ${vault.mount}/${vault.pathPrefix}`
+                : 'Not connected. New secrets are saved on this server, unencrypted.'}
+            </p>
+          </div>
+          {vault?.connected && (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsVaultFormOpen(open => !open)}
+                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold transition-all"
+              >
+                {isVaultFormOpen ? 'Close' : 'Edit'}
+              </button>
+              <button
+                type="button"
+                onClick={handleDisconnectVault}
+                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5"
+              >
+                <Unplug size={13} />
+                <span>Disconnect</span>
+              </button>
+            </div>
+          )}
+        </div>
+
+        {(vault?.error || vaultListError) && (
+          <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs font-medium flex items-center gap-2">
+            <AlertTriangle size={16} className="shrink-0" />
+            <span>{vault?.error || vaultListError}</span>
+          </div>
+        )}
+
+        {showVaultForm && (
+          <form onSubmit={handleConnectVault} className="space-y-3 pt-3 border-t border-slate-100">
+            {vaultFormError && (
+              <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs font-medium flex items-center gap-2">
+                <AlertTriangle size={16} className="shrink-0" />
+                <span>{vaultFormError}</span>
+              </div>
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Vault Address</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="https://vault.internal:8200"
+                  value={vaultForm.address}
+                  onChange={(e) => setVaultForm({ ...vaultForm, address: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                />
+                {vaultForm.address.startsWith('http://') && (
+                  <p className="text-[11px] text-amber-600 mt-1">http sends the token and secrets unencrypted. Use https outside local testing.</p>
+                )}
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Token</label>
+                <input
+                  type="password"
+                  autoComplete="off"
+                  placeholder={vault?.hasToken ? 'Saved. Leave blank to keep it.' : 'Vault token'}
+                  value={vaultForm.token}
+                  onChange={(e) => setVaultForm({ ...vaultForm, token: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                />
+                <p className="text-[11px] text-slate-400 mt-1">
+                  {vault?.tokenFromEnv ? 'Using VAULT_TOKEN from the server environment.' : 'A token entered here is saved in plaintext on this server. VAULT_TOKEN is safer.'}
+                </p>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">KV v2 Mount</label>
+                <input
+                  type="text"
+                  required
+                  value={vaultForm.mount}
+                  onChange={(e) => setVaultForm({ ...vaultForm, mount: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Path Prefix</label>
+                <input
+                  type="text"
+                  value={vaultForm.pathPrefix}
+                  onChange={(e) => setVaultForm({ ...vaultForm, pathPrefix: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Namespace (Enterprise only)</label>
+                <input
+                  type="text"
+                  value={vaultForm.namespace}
+                  onChange={(e) => setVaultForm({ ...vaultForm, namespace: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                disabled={isConnectingVault}
+                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-2"
+              >
+                <ShieldCheck size={13} />
+                <span>{isConnectingVault ? 'Connecting...' : 'Connect to Vault'}</span>
+              </button>
+            </div>
+          </form>
+        )}
       </div>
 
       {/* Filter & Search Bar */}
@@ -244,7 +454,7 @@ export default function SecretsVaultPage() {
         </div>
 
         <div className="text-xs text-slate-400 font-mono">
-          Showing {filteredSecrets.length} sealed secrets
+          Showing {filteredSecrets.length} secrets
         </div>
       </div>
 
@@ -254,11 +464,11 @@ export default function SecretsVaultPage() {
           {isLoading && secrets.length === 0 ? (
             <div className="py-12 text-center text-slate-500 font-medium text-xs">
               <RefreshCw className="animate-spin inline-block mr-2 text-indigo-600" size={16} />
-              Loading sealed environment secrets from host...
+              Loading secrets...
             </div>
           ) : filteredSecrets.length === 0 ? (
             <div className="py-12 text-center text-slate-400 font-medium text-xs">
-              No matching sealed secrets found.
+              No matching secrets found.
             </div>
           ) : (
             filteredSecrets.map((sec) => (
@@ -281,35 +491,47 @@ export default function SecretsVaultPage() {
                   )}
                 </div>
                 <div className="text-[11px] text-slate-400 font-medium">{sec.scope} &bull; Last Rotated: {sec.lastRotated}</div>
+                {sec.vaultPath && <div className="text-[11px] text-slate-400 font-mono">{sec.vaultPath}</div>}
               </div>
 
               <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-slate-100 rounded-xl font-mono text-xs text-slate-700 min-w-[240px] max-w-sm flex items-center justify-between border border-slate-200 overflow-hidden">
-                  <span className="truncate">{revealedSecrets[sec.id] ? (sec.fullValue || sec.value) : '••••••••••••••••••••••••'}</span>
+                {sec.source === 'vault' ? (
+                  <div className="p-2.5 bg-indigo-50 rounded-xl text-xs font-medium text-indigo-700 min-w-[240px] max-w-sm flex items-center gap-2 border border-indigo-100">
+                    <ShieldCheck size={14} className="shrink-0" />
+                    <span className="truncate">Stored in HashiCorp Vault</span>
+                  </div>
+                ) : (
+                  <>
+                    <div className="p-2.5 bg-slate-100 rounded-xl font-mono text-xs text-slate-700 min-w-[240px] max-w-sm flex items-center justify-between border border-slate-200 overflow-hidden">
+                      <span className="truncate">{revealedSecrets[sec.id] ? (sec.fullValue || sec.value) : '••••••••••••••••••••••••'}</span>
+                      <button
+                        onClick={() => toggleSecretReveal(sec.id)}
+                        className="text-slate-400 hover:text-slate-700 transition-colors ml-2 shrink-0"
+                        title={revealedSecrets[sec.id] ? 'Mask Secret' : 'Reveal Secret'}
+                      >
+                        {revealedSecrets[sec.id] ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </button>
+                    </div>
+
+                    <button
+                      onClick={() => copyToClipboard(sec.fullValue || sec.value, sec.id)}
+                      className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs transition-colors"
+                      title="Copy Secret"
+                    >
+                      {copiedKey === sec.id ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
+                    </button>
+                  </>
+                )}
+
+                {sec.source !== 'env' && (
                   <button
-                    onClick={() => toggleSecretReveal(sec.id)}
-                    className="text-slate-400 hover:text-slate-700 transition-colors ml-2 shrink-0"
-                    title={revealedSecrets[sec.id] ? 'Mask Secret' : 'Reveal Secret'}
+                    onClick={() => openSecretModal(sec)}
+                    className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs transition-colors"
+                    title="Enter a New Value"
                   >
-                    {revealedSecrets[sec.id] ? <EyeOff size={14} /> : <Eye size={14} />}
+                    <RotateCw size={14} />
                   </button>
-                </div>
-
-                <button
-                  onClick={() => copyToClipboard(sec.fullValue || sec.value, sec.id)}
-                  className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs transition-colors"
-                  title="Copy Secret"
-                >
-                  {copiedKey === sec.id ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
-                </button>
-
-                <button
-                  onClick={() => handleRotateSecret(sec)}
-                  className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs transition-colors"
-                  title="Force Rotate Secret Now"
-                >
-                  <RotateCw size={14} />
-                </button>
+                )}
               </div>
             </div>
           )))}
@@ -339,8 +561,10 @@ export default function SecretsVaultPage() {
                     <Key size={18} />
                   </div>
                   <div>
-                    <h3 className="font-bold text-slate-900 text-base">Store New Cryptographic Secret</h3>
-                    <p className="text-xs text-slate-400">Values are sealed with AES-256 before disk persistence</p>
+                    <h3 className="font-bold text-slate-900 text-base">Store Secret</h3>
+                    <p className="text-xs text-slate-400">
+                      {vault?.configured ? 'Stored in HashiCorp Vault. Existing keys get a new version.' : 'Saved on this server, unencrypted. Connect Vault to encrypt it.'}
+                    </p>
                   </div>
                 </div>
                 <button
@@ -352,6 +576,13 @@ export default function SecretsVaultPage() {
               </div>
 
               <form onSubmit={handleCreateSecret} className="space-y-4 mt-4">
+                {secretError && (
+                  <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs font-medium flex items-center gap-2">
+                    <AlertTriangle size={16} className="shrink-0" />
+                    <span>{secretError}</span>
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">Secret Key Name</label>
                   <input
@@ -415,7 +646,7 @@ export default function SecretsVaultPage() {
                     className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-2"
                   >
                     <Lock size={13} />
-                    <span>Seal & Persist Secret</span>
+                    <span>Store Secret</span>
                   </button>
                 </div>
               </form>

@@ -177,7 +177,7 @@ interface AnsibleConfigSectionProps {
 }
 
 const DEFAULT_CONFIG: AnsibleConfigData = {
-  ansibleDirectory: '.',
+  ansibleDirectory: 'ansible',
   ansibleLocation: '/usr/bin/ansible-playbook',
   ansibleBinary: '/usr/bin/ansible',
   inventoryFile: 'inventory/hosts.ini',
@@ -1298,7 +1298,7 @@ export default function AnsibleConfigSection({ onBack, showNotification }: Ansib
                     type="text"
                     value={config.ansibleDirectory}
                     onChange={(e) => setConfig({ ...config, ansibleDirectory: e.target.value })}
-                    placeholder="./ (Current Project Root) or /etc/ansible"
+                    placeholder="ansible (Project Folder) or /etc/ansible"
                     className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-medium text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
                   />
                 </div>
@@ -1307,10 +1307,10 @@ export default function AnsibleConfigSection({ onBack, showNotification }: Ansib
                   <span className="text-[10px] text-slate-400">Directory presets:</span>
                   <button
                     type="button"
-                    onClick={() => setConfig({ ...config, ansibleDirectory: '.' })}
+                    onClick={() => setConfig({ ...config, ansibleDirectory: 'ansible' })}
                     className="text-[10px] font-mono px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md font-semibold"
                   >
-                    . (Current App Root)
+                    ansible (Project Folder)
                   </button>
                   <button
                     type="button"
